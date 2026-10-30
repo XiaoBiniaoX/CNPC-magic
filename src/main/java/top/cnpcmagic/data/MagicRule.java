@@ -15,6 +15,7 @@ public class MagicRule {
     public int cooldownTicks = 200;
     public int range = 6;
     public boolean enabled = false;
+    public boolean independent = false;
 
     public CompoundTag save() {
         CompoundTag tag = new CompoundTag();
@@ -24,6 +25,7 @@ public class MagicRule {
         tag.putInt("cooldown", cooldownTicks);
         tag.putInt("range", range);
         tag.putBoolean("enabled", enabled);
+        tag.putBoolean("independent", independent);
         return tag;
     }
 
@@ -35,6 +37,7 @@ public class MagicRule {
         rule.cooldownTicks = tag.getInt("cooldown");
         rule.range = tag.getInt("range");
         rule.enabled = tag.getBoolean("enabled");
+        rule.independent = tag.getBoolean("independent");
         return rule;
     }
 

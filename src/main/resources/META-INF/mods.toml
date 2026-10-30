@@ -5,7 +5,7 @@ license="NC"
 
 [[mods]]
 modId="cnpcmagic"
-version="1.0.0"
+version="${mod_version}"
 displayName="CNPC魔法拓展"
 displayURL="https://space.bilibili.com/353609880"
 authors="XiaoBiniaoX"

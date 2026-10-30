@@ -65,15 +65,21 @@ public final class MagicVerification {
         root.put("npcs", npcs);
         MagicDataStore store = new MagicDataStore(root);
         check(store.getRules(id, "irons_spellbooks").size() == 1, "old data migration");
+        CompoundTag legacy = rule("irons_spellbooks:firebolt", 2, 60, 3).save();
+        legacy.remove("independent");
+        check(!MagicRule.load(legacy).independent && !new MagicRule().independent, "independent defaults off");
         List<MagicRule> entries = new ArrayList<>();
         for (int i = 0; i < 200; i++) {
-            entries.add(rule("irons_spellbooks:firebolt", i + 1, i * 20, i + 1));
+            MagicRule entry = rule("irons_spellbooks:firebolt", i + 1, i * 20, i + 1);
+            entry.independent = i % 2 == 1;
+            entries.add(entry);
         }
         store.setRules(id, "irons_spellbooks", entries);
         store = new MagicDataStore(store.save(new CompoundTag()));
         List<MagicRule> restored = store.getRules(id, "irons_spellbooks");
         check(restored.size() == 200 && restored.get(199).level == 200 && restored.get(0).level == 1,
             "array independence and round trip");
+        check(!restored.get(0).independent && restored.get(199).independent, "per-entry independent round trip");
         MagicRule invalid = rule("irons_spellbooks:does_not_exist", -1, -1, -1);
         invalid.sanitize(new CounterProvider());
         check(invalid.spellId.isEmpty() && invalid.casts == 1 && invalid.cooldownTicks == 0 && invalid.level == 1,
@@ -83,6 +89,8 @@ public final class MagicVerification {
         check(!state.completed(1, twoCasts) && state.completed(2, twoCasts), "round count");
         check(!state.isReady(61) && state.isReady(62), "cooldown boundary");
         check(!state.completed(62, twoCasts) && state.completed(63, twoCasts), "round reset");
+        twoCasts.independent = true;
+        check(state.completed(70, twoCasts) && !state.isReady(129) && state.isReady(130), "independent skips round count");
         CNPCMagic.LOGGER.info("VERIFY PASS data: 200 independent entries, old migration, validation, repeated rounds");
     }
 

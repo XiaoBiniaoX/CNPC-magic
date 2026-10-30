@@ -6,6 +6,7 @@
   "refmap": "cnpcmagic.refmap.json",
   "mixins": [
     "MixinGoetyScriptTarget",
+    "MixinIronCastData",
     "MixinLivingScriptMagic",
     "MixinScriptCarrierMagic"
   ],

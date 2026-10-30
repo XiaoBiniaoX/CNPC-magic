@@ -20,8 +20,10 @@ import top.cnpcmagic.server.NpcAnimationSync;
 
 import java.util.List;
 import java.util.Set;
+import java.util.function.Supplier;
 
 public final class IronAdapter {
+    private static final ThreadLocal<CastData> INVOKING = new ThreadLocal<>();
     private static final Set<String> PLAYER_ONLY = Set.of(
         "irons_spellbooks:summon_ender_chest", "irons_spellbooks:recall", "irons_spellbooks:pocket_dimension"
     );
@@ -49,14 +51,37 @@ public final class IronAdapter {
         if (!isSupportedSpell(spell)) {
             return null;
         }
-        MagicData magicData = MagicData.getPlayerMagicData(caster);
-        if (magicData == null || magicData.isCasting()) {
+        MagicData nativeData = MagicData.getPlayerMagicData(caster);
+        if (nativeData == null || nativeData.isCasting()) {
             return null;
         }
-        if (caster instanceof Player) {
-            // Script casts own their lifecycle; do not let Iron's normal player tick advance the same session twice.
-            magicData = new MagicData(true);
+        // Each session owns casting/aiming data; native player ticks must not advance it, nor sibling casts overwrite it.
+        MagicData magicData = new MagicData(true);
+        return withData(caster, magicData, () -> prepareCast(caster, spellId, level, target, spell, magicData));
+    }
+
+    /** Optional Mixin hook, only substitutes data during this session's synchronous native calls. */
+    public static MagicData getCastData(LivingEntity caster) {
+        CastData current = INVOKING.get();
+        return current != null && current.caster == caster ? current.data : null;
+    }
+
+    private static <T> T withData(LivingEntity caster, MagicData data, Supplier<T> action) {
+        CastData previous = INVOKING.get();
+        INVOKING.set(new CastData(caster, data));
+        try {
+            return action.get();
+        } finally {
+            if (previous == null) INVOKING.remove();
+            else INVOKING.set(previous);
         }
+    }
+
+    private record CastData(LivingEntity caster, MagicData data) {
+    }
+
+    private static MagicCast prepareCast(LivingEntity caster, String spellId, int level, LivingEntity target,
+                                         AbstractSpell spell, MagicData magicData) {
         if (magicData.getSyncedData().getServerPlayerId() != caster.getId()) {
             magicData.setSyncedData(new SyncedSpellData(caster));
         }
@@ -120,6 +145,10 @@ public final class IronAdapter {
 
         @Override
         public boolean tick(LivingEntity caster, LivingEntity target) {
+            return withData(caster, data, () -> tickScoped(caster, target));
+        }
+
+        private boolean tickScoped(LivingEntity caster, LivingEntity target) {
             if (finished) {
                 return true;
             }
@@ -156,7 +185,7 @@ public final class IronAdapter {
         @Override
         public void cancel(LivingEntity caster) {
             successful = false;
-            complete(caster, true);
+            withData(caster, data, () -> { complete(caster, true); return null; });
         }
 
         private void complete(LivingEntity caster, boolean cancelled) {

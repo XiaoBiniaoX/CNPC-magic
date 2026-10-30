@@ -44,6 +44,7 @@ public class CNPCMagic {
             if (Boolean.getBoolean("cnpcmagic.verify")) {
                 MinecraftForge.EVENT_BUS.register(top.cnpcmagic.verify.MagicVerification.class);
                 MinecraftForge.EVENT_BUS.register(top.cnpcmagic.verify.MagicScriptVerification.class);
+                MinecraftForge.EVENT_BUS.register(top.cnpcmagic.verify.IndependentVerification.class);
             }
         });
     }

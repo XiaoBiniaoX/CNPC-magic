@@ -107,25 +107,32 @@ public class GuiNpcMagic extends GuiNPCInterface2 implements IGuiData, ITextfiel
         addButton(new GuiButtonNop(this, 10, x + 102, y, 64, 18,
             new String[]{"cnpcmagic.gui.off", "cnpcmagic.gui.on"}, rule.enabled ? 1 : 0));
 
-        y += 26;
+        y += 22;
+        addLabel(new GuiLabel(8, "cnpcmagic.gui.independent", x, y + 5));
+        addButton(new GuiButtonNop(this, 12, x + 102, y, 64, 18,
+            new String[]{"cnpcmagic.gui.off", "cnpcmagic.gui.on"}, rule.independent ? 1 : 0));
+
+        y += 22;
         addLabel(new GuiLabel(2, "cnpcmagic.gui.spell", x, y + 5));
         GuiButtonNop spellButton = new GuiButtonNop(this, 11, x + 62, y, 134, 18, "");
         spellButton.setMessage(Component.literal(spellName(provider, rule)));
         addButton(spellButton);
 
-        y += 24;
+        y += 22;
         addLabel(new GuiLabel(3, selectedProvider.equals("goety") ? "cnpcmagic.gui.goetyLevel" : "cnpcmagic.gui.level", x, y + 5));
         addTextField(numberField(20, x + 102, y, rule.level, 1, Math.max(1, provider.getMaxLevel(rule.spellId)), 1));
 
-        y += 24;
-        addLabel(new GuiLabel(4, "cnpcmagic.gui.casts", x, y + 5));
-        addTextField(numberField(21, x + 102, y, rule.casts, 1, 100, 3));
+        y += 22;
+        addLabel(new GuiLabel(4, rule.independent ? "cnpcmagic.gui.castsUnused" : "cnpcmagic.gui.casts", x, y + 5));
+        GuiTextFieldNop countField = numberField(21, x + 102, y, rule.casts, 1, 100, 3);
+        countField.enabled = !rule.independent;
+        addTextField(countField);
 
-        y += 24;
+        y += 22;
         addLabel(new GuiLabel(5, "cnpcmagic.gui.cooldown", x, y + 5));
         addTextField(numberField(22, x + 102, y, rule.cooldownTicks / 20, 0, 3600, 10));
 
-        y += 24;
+        y += 22;
         addLabel(new GuiLabel(6, "cnpcmagic.gui.range", x, y + 5));
         addTextField(numberField(23, x + 102, y, rule.range, 1, 64, 6));
 
@@ -169,6 +176,12 @@ public class GuiNpcMagic extends GuiNPCInterface2 implements IGuiData, ITextfiel
                 }
             }
             case 11 -> openSpellPicker(rule);
+            case 12 -> {
+                if (rule != null) {
+                    rule.independent = button.getValue() == 1;
+                    init();
+                }
+            }
             case 13 -> {
                 List<MagicRule> entries = rules.get(selectedProvider);
                 if (entries != null) {
