@@ -1,0 +1,20 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "top.cnpcmagic.mixin",
+  "refmap": "refmap.cnpcmagic.json",
+  "target": "@env(DEFAULT)",
+  "compatibilityLevel": "JAVA_8",
+  "mixins": [
+    "MixinEntityNPCInterface",
+    "MixinLivingScriptMagic",
+    "MixinScriptCarrierMagic",
+    "MixinShieldSpells",
+    "MixinEntityShield"
+  ],
+  "client": [
+    "MixinGuiNpcMenu",
+    "MixinWizardryClientProxy",
+    "MixinRenderShield"
+  ]
+}

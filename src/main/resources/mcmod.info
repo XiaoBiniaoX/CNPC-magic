@@ -1,0 +1,16 @@
+[
+{
+  "modid": "${mod_id}",
+  "name": "${mod_name}",
+  "description": "${mod_description}",
+  "version": "${version}",
+  "mcversion": "${mcversion}",
+  "url": "",
+  "updateUrl": "",
+  "authorList": ${mod_author},
+  "credits": "Noppes (CustomNPCs), Electroblob (Electroblob's Wizardry)",
+  "logoFile": "",
+  "screenshots": [],
+  "dependencies": ["mixinbooter", "customnpcs", "ebwizardry"]
+}
+]
