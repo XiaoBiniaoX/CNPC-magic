@@ -8,9 +8,15 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import net.minecraft.entity.EntityLivingBase;
+import net.minecraft.entity.Entity;
+import net.minecraft.entity.IProjectile;
+import net.minecraft.util.DamageSource;
+import net.minecraft.util.math.Vec3d;
+import net.minecraftforge.event.entity.living.LivingAttackEvent;
 import net.minecraftforge.event.entity.living.LivingDeathEvent;
 import net.minecraftforge.event.entity.living.LivingEvent;
 import net.minecraftforge.event.world.WorldEvent;
+import net.minecraftforge.fml.common.eventhandler.EventPriority;
 import net.minecraftforge.fml.common.eventhandler.SubscribeEvent;
 import noppes.npcs.entity.EntityNPCInterface;
 import top.cnpcmagic.CNPCMagic;
@@ -19,6 +25,9 @@ import top.cnpcmagic.data.MagicRule;
 import top.cnpcmagic.wizardry.CastHandle;
 import top.cnpcmagic.wizardry.WizardryCasting;
 import top.cnpcmagic.wizardry.WizardrySpells;
+import top.cnpcmagic.wizardry.MagicCasterAccess;
+import electroblob.wizardry.entity.living.ISpellCaster;
+import electroblob.wizardry.registry.Spells;
 
 /** Runs ordered rounds and independently cooled rules for configured NPCs. */
 public final class MagicCombatHandler {
@@ -99,7 +108,7 @@ public final class MagicCombatHandler {
             if (now < runtime.readyAt) continue;
             try {
                 Spell spell = WizardrySpells.get(rule.spellId);
-                CastHandle handle = WizardryCasting.start(npc, spell, rule.level, target);
+                CastHandle handle = WizardryCasting.start(npc, spell, rule.level, target, rule.durationTicks);
                 if (handle != null) {
                     state.active = handle;
                     state.activeRule = rule;
@@ -154,7 +163,8 @@ public final class MagicCombatHandler {
             }
             if (now < runtime.readyAt || !usable(npc, target, rule)) continue;
             try {
-                runtime.active = WizardryCasting.start(npc, WizardrySpells.get(rule.spellId), rule.level, target);
+                runtime.active = WizardryCasting.start(npc, WizardrySpells.get(rule.spellId), rule.level,
+                    target, rule.durationTicks);
                 if (runtime.active == null) runtime.readyAt = now + 20;
                 else runtime.targetId = target.getEntityId();
             } catch (RuntimeException | LinkageError error) {
@@ -205,6 +215,33 @@ public final class MagicCombatHandler {
     public static void death(LivingDeathEvent event) {
         if (!event.getEntityLiving().world.isRemote && event.getEntityLiving() instanceof EntityNPCInterface) {
             reset((EntityNPCInterface) event.getEntityLiving());
+        }
+    }
+
+    /** The native shield entity handles direct collisions; this closes melee/AOE paths that hit its NPC owner. */
+    @SubscribeEvent(priority = EventPriority.HIGH)
+    public static void shieldBlock(LivingAttackEvent event) {
+        if (!(event.getEntityLiving() instanceof EntityNPCInterface) || event.getSource().isUnblockable()) return;
+        EntityNPCInterface npc = (EntityNPCInterface) event.getEntityLiving();
+        if (npc.world.isRemote || ((ISpellCaster) npc).getContinuousSpell() != Spells.shield) return;
+        if (((MagicCasterAccess) npc).cnpcmagic$getShield() == null
+            || ((MagicCasterAccess) npc).cnpcmagic$getShield().isDead) return;
+        Entity immediate = event.getSource().getImmediateSource();
+        Entity source = event.getSource().getTrueSource();
+        if (source == null) source = immediate;
+        if (source == null || source == npc) return;
+        Vec3d incoming;
+        if (source == immediate && immediate instanceof IProjectile
+            && immediate.motionX * immediate.motionX + immediate.motionY * immediate.motionY
+                + immediate.motionZ * immediate.motionZ > 0) {
+            // At impact the projectile may already overlap the NPC, so use the direction it came from.
+            incoming = new Vec3d(-immediate.motionX, -immediate.motionY, -immediate.motionZ);
+        } else {
+            incoming = new Vec3d(source.posX - npc.posX,
+                source.posY + source.height * 0.5 - (npc.posY + npc.getEyeHeight()), source.posZ - npc.posZ);
+        }
+        if (incoming.lengthSquared() > 0 && npc.getLookVec().dotProduct(incoming.normalize()) > 0) {
+            event.setCanceled(true);
         }
     }
 

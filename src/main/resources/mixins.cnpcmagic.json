@@ -10,11 +10,13 @@
     "MixinLivingScriptMagic",
     "MixinScriptCarrierMagic",
     "MixinShieldSpells",
+    "MixinSpellRay",
     "MixinEntityShield"
   ],
   "client": [
     "MixinGuiNpcMenu",
     "MixinWizardryClientProxy",
+    "MixinWizardryEventHandler",
     "MixinRenderShield"
   ]
 }

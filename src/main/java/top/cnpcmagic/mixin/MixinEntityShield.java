@@ -3,6 +3,7 @@ package top.cnpcmagic.mixin;
 import electroblob.wizardry.data.WizardData;
 import electroblob.wizardry.entity.EntityShield;
 import electroblob.wizardry.registry.Spells;
+import electroblob.wizardry.spell.Shield;
 import electroblob.wizardry.util.EntityUtils;
 import java.lang.ref.WeakReference;
 import net.minecraft.entity.EntityLivingBase;
@@ -36,6 +37,10 @@ public abstract class MixinEntityShield implements ShieldAccess {
         if (owner == null) return; // Preserve ordinary wand casting unchanged.
         ci.cancel();
         if (owner.isDead || owner.world != shield.world || !EntityUtils.isCasting(owner, Spells.shield)) {
+            if (owner instanceof EntityPlayer) {
+                WizardData data = WizardData.get((EntityPlayer) owner);
+                if (data != null) data.setVariable(Shield.SHIELD_KEY, null);
+            }
             shield.setDead();
             return;
         }

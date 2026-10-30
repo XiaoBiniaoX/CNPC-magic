@@ -99,21 +99,21 @@ public final class GuiNpcMagic extends GuiNPCInterface2
         addButton(new GuiNpcButton(10, x + 102, y, 64, 18,
             new String[]{"cnpcmagic.gui.off", "cnpcmagic.gui.on"}, rule.enabled ? 1 : 0));
 
-        y += 22;
+        y += 20;
         addLabel(new GuiNpcLabel(8, "cnpcmagic.gui.independent", x, y + 5));
         addButton(new GuiNpcButton(12, x + 102, y, 64, 18,
             new String[]{"cnpcmagic.gui.off", "cnpcmagic.gui.on"}, rule.independent ? 1 : 0));
 
-        y += 22;
+        y += 20;
         addLabel(new GuiNpcLabel(2, "cnpcmagic.gui.spell", x, y + 5));
         addButton(new GuiNpcButton(11, x + 50, y, 96, 18, spellName(rule)));
         addButton(new GuiNpcButton(15, x + 150, y, 48, 18, "cnpcmagic.gui.clear"));
 
-        y += 22;
+        y += 20;
         addLabel(new GuiNpcLabel(3, "cnpcmagic.gui.level", x, y + 5));
         addTextField(numberField(20, x + 102, y, rule.level, 1, MagicRule.MAX_LEVEL, 1));
 
-        y += 22;
+        y += 20;
         addLabel(new GuiNpcLabel(4,
             rule.independent ? "cnpcmagic.gui.castsUnused" : "cnpcmagic.gui.casts", x, y + 5));
         GuiNpcTextField casts = numberField(21, x + 102, y, rule.casts, 1, MagicRule.MAX_CASTS, 3);
@@ -121,13 +121,21 @@ public final class GuiNpcMagic extends GuiNPCInterface2
         casts.canEdit = !rule.independent;
         addTextField(casts);
 
-        y += 22;
+        y += 20;
         addLabel(new GuiNpcLabel(5, "cnpcmagic.gui.cooldown", x, y + 5));
         addTextField(numberField(22, x + 102, y, rule.cooldownTicks / 20, 0, 3600, 10));
 
-        y += 22;
+        y += 20;
         addLabel(new GuiNpcLabel(6, "cnpcmagic.gui.range", x, y + 5));
         addTextField(numberField(23, x + 102, y, rule.range, 1, MagicRule.MAX_RANGE, 6));
+
+        Spell spell = WizardrySpells.get(rule.spellId);
+        if (spell != null && spell.isContinuous) {
+            y += 20;
+            addLabel(new GuiNpcLabel(9, "cnpcmagic.gui.duration", x, y + 5));
+            addTextField(numberField(24, x + 102, y, rule.durationTicks, 1,
+                MagicRule.MAX_DURATION_TICKS, MagicRule.DEFAULT_DURATION_TICKS));
+        }
 
         addLabel(new GuiNpcLabel(7, "cnpcmagic.gui.hint", guiLeft + 8, guiTop + 186, 0x777777));
     }
@@ -234,6 +242,9 @@ public final class GuiNpcMagic extends GuiNPCInterface2
             case 23:
                 rule.range = readInt(field, 1, MagicRule.MAX_RANGE, 6);
                 break;
+            case 24:
+                rule.durationTicks = readInt(field, 1, MagicRule.MAX_DURATION_TICKS, MagicRule.DEFAULT_DURATION_TICKS);
+                break;
             default:
                 break;
         }
@@ -244,7 +255,7 @@ public final class GuiNpcMagic extends GuiNPCInterface2
     }
 
     private void applyFields() {
-        for (int id : new int[]{20, 21, 22, 23}) {
+        for (int id : new int[]{20, 21, 22, 23, 24}) {
             GuiNpcTextField field = getTextField(id);
             if (field != null) unFocused(field);
         }

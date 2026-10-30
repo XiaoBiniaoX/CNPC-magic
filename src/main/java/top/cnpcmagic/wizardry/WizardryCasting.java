@@ -16,59 +16,68 @@ import net.minecraft.util.EnumHand;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.fml.common.network.NetworkRegistry.TargetPoint;
 import net.minecraftforge.fml.common.network.simpleimpl.IMessage;
+import top.cnpcmagic.data.MagicRule;
 
 /** Executes Wizardry's native player and NPC cast paths without duplicating spell effects. */
 public final class WizardryCasting {
-    public static final int CONTINUOUS_TICKS = 50;
+    public static final int CONTINUOUS_TICKS = MagicRule.DEFAULT_DURATION_TICKS;
 
     private WizardryCasting() {
     }
 
     public static CastHandle start(EntityLivingBase caster, Spell spell, int level, EntityLivingBase target) {
+        return start(caster, spell, level, target, CONTINUOUS_TICKS);
+    }
+
+    public static CastHandle start(EntityLivingBase caster, Spell spell, int level, EntityLivingBase target,
+                                    int durationTicks) {
         if (caster == null || target == null || spell == null || caster.world.isRemote
             || caster.world != target.world || caster.isDead || target.isDead) return null;
+        if (spell.isContinuous && (durationTicks < 1 || durationTicks > MagicRule.MAX_DURATION_TICKS)) return null;
 
         face(caster, target);
         SpellModifiers modifiers = new SpellModifiers().set(SpellModifiers.POTENCY, level, true);
-        if (caster instanceof EntityPlayer) return startPlayer((EntityPlayer) caster, spell, modifiers);
+        if (caster instanceof EntityPlayer) return startPlayer((EntityPlayer) caster, spell, modifiers, durationTicks);
         if (caster instanceof EntityLiving && caster instanceof ISpellCaster && caster instanceof MagicCasterAccess) {
-            return startNpc((EntityLiving) caster, spell, modifiers, target);
+            return startNpc((EntityLiving) caster, spell, modifiers, target, durationTicks);
         }
         return null;
     }
 
     private static CastHandle startNpc(EntityLiving caster, Spell spell, SpellModifiers modifiers,
-                                       EntityLivingBase target) {
+                                       EntityLivingBase target, int durationTicks) {
         ISpellCaster spellCaster = (ISpellCaster) caster;
         if (spell.isContinuous && spellCaster.getContinuousSpell() != Spells.none) return null;
         if (MinecraftForge.EVENT_BUS.post(new SpellCastEvent.Pre(
             SpellCastEvent.Source.NPC, spell, caster, modifiers))) return null;
         if (!spell.cast(caster.world, caster, EnumHand.MAIN_HAND, 0, target, modifiers)) return null;
 
-        ((MagicCasterAccess) caster).cnpcmagic$setModifiers(modifiers);
         MinecraftForge.EVENT_BUS.post(new SpellCastEvent.Post(
             SpellCastEvent.Source.NPC, spell, caster, modifiers));
 
         if (spell.isContinuous) {
+            ((MagicCasterAccess) caster).cnpcmagic$setModifiers(modifiers);
+            ((MagicCasterAccess) caster).cnpcmagic$setSpellTargetId(target.getEntityId());
             spellCaster.setContinuousSpell(spell);
             spellCaster.setSpellCounter(1);
             sendNpcPacket(caster, target, spell, modifiers);
-            return new NpcContinuous(spell, modifiers, target.getEntityId());
+            return new NpcContinuous(spell, modifiers, target.getEntityId(), durationTicks,
+                caster.world.getTotalWorldTime());
         }
 
         if (spell.requiresPacket()) sendNpcPacket(caster, target, spell, modifiers);
         return Completed.SUCCESS;
     }
 
-    private static CastHandle startPlayer(EntityPlayer caster, Spell spell, SpellModifiers modifiers) {
+    private static CastHandle startPlayer(EntityPlayer caster, Spell spell, SpellModifiers modifiers, int durationTicks) {
         if (MinecraftForge.EVENT_BUS.post(new SpellCastEvent.Pre(
             SpellCastEvent.Source.COMMAND, spell, caster, modifiers))) return null;
 
         if (spell.isContinuous) {
             WizardData data = WizardData.get(caster);
             if (data == null || data.isCasting()) return null;
-            data.startCastingContinuousSpell(spell, modifiers, CONTINUOUS_TICKS);
-            return new PlayerContinuous(spell, modifiers);
+            data.startCastingContinuousSpell(spell, modifiers, durationTicks);
+            return new PlayerContinuous(spell, modifiers, durationTicks, caster.world.getTotalWorldTime());
         }
 
         if (!spell.cast(caster.world, caster, EnumHand.MAIN_HAND, 0, modifiers)) return null;
@@ -117,30 +126,38 @@ public final class WizardryCasting {
         private final Spell spell;
         private final SpellModifiers modifiers;
         private final int targetId;
+        private final int durationTicks;
+        private long lastTick;
         private int ticks = 1;
         private boolean successful;
         private boolean finished;
 
-        private NpcContinuous(Spell spell, SpellModifiers modifiers, int targetId) {
+        private NpcContinuous(Spell spell, SpellModifiers modifiers, int targetId, int durationTicks, long startTick) {
             this.spell = spell;
             this.modifiers = modifiers;
             this.targetId = targetId;
+            this.durationTicks = durationTicks;
+            this.lastTick = startTick;
         }
 
         @Override
         public boolean tick(EntityLivingBase base, EntityLivingBase target) {
             if (finished) return true;
             EntityLiving caster = (EntityLiving) base;
+            long now = caster.world.getTotalWorldTime();
+            if (now == lastTick) return false; // A script may start during this same server tick.
+            lastTick = now;
             if (target == null || target.isDead || target.getEntityId() != targetId || caster.world != target.world
-                || ticks >= CONTINUOUS_TICKS
+                || ticks >= durationTicks
                 || MinecraftForge.EVENT_BUS.post(new SpellCastEvent.Tick(
                     SpellCastEvent.Source.NPC, spell, caster, modifiers, ticks))
                 || !spell.cast(caster.world, caster, EnumHand.MAIN_HAND, ticks, target, modifiers)) {
-                successful = ticks >= CONTINUOUS_TICKS;
+                successful = ticks >= durationTicks;
                 finish(caster, target);
                 return true;
             }
             ticks++;
+            ((ISpellCaster) caster).setSpellCounter(ticks);
             return false;
         }
 
@@ -160,6 +177,7 @@ public final class WizardryCasting {
                 SpellCastEvent.Source.NPC, spell, caster, modifiers, ticks));
             spell.finishCasting(caster.world, caster, Double.NaN, Double.NaN, Double.NaN, null, ticks, modifiers);
             MagicCasterAccess access = (MagicCasterAccess) caster;
+            access.cnpcmagic$setSpellTargetId(-1);
             if (spell == Spells.shield && access.cnpcmagic$getShield() != null) {
                 access.cnpcmagic$getShield().setDead();
                 access.cnpcmagic$setShield(null);
@@ -174,23 +192,30 @@ public final class WizardryCasting {
     private static final class PlayerContinuous implements CastHandle {
         private final Spell spell;
         private final SpellModifiers modifiers;
+        private final int durationTicks;
+        private long lastTick;
         private int ticks;
         private boolean successful;
         private boolean finished;
 
-        private PlayerContinuous(Spell spell, SpellModifiers modifiers) {
+        private PlayerContinuous(Spell spell, SpellModifiers modifiers, int durationTicks, long startTick) {
             this.spell = spell;
             this.modifiers = modifiers;
+            this.durationTicks = durationTicks;
+            this.lastTick = startTick;
         }
 
         @Override
         public boolean tick(EntityLivingBase base, EntityLivingBase target) {
             if (finished) return true;
             EntityPlayer player = (EntityPlayer) base;
+            long now = player.world.getTotalWorldTime();
+            if (now == lastTick) return false;
+            lastTick = now;
             WizardData data = WizardData.get(player);
             ticks++;
-            if (data == null || !data.isCasting() || ticks >= CONTINUOUS_TICKS) {
-                successful = ticks >= CONTINUOUS_TICKS;
+            if (data == null || !data.isCasting() || ticks >= durationTicks) {
+                successful = ticks >= durationTicks;
                 finish(player);
                 return true;
             }

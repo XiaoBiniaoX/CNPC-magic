@@ -30,6 +30,10 @@ public final class ScriptMagic {
 
     /** Returns true when the cast was accepted. */
     public static boolean cast(Object casterObject, String spellId, int level, Object targetObject) {
+        return cast(casterObject, spellId, level, targetObject, MagicRule.DEFAULT_DURATION_TICKS);
+    }
+
+    public static boolean cast(Object casterObject, String spellId, int level, Object targetObject, int durationTicks) {
         EntityLivingBase caster = unwrap(casterObject);
         EntityLivingBase target = unwrap(targetObject);
         if (!valid(caster, target) || level < 1 || level > MagicRule.MAX_LEVEL || ACTIVE.containsKey(caster)) {
@@ -37,6 +41,7 @@ public final class ScriptMagic {
         }
         Spell spell = WizardrySpells.get(spellId);
         if (spell == null) return false;
+        if (spell.isContinuous && (durationTicks < 1 || durationTicks > MagicRule.MAX_DURATION_TICKS)) return false;
         if (caster instanceof EntityNPCInterface) {
             if (!WizardrySpells.isSupported(spellId, (EntityNPCInterface) caster)) return false;
             MagicCombatHandler.reset((EntityNPCInterface) caster);
@@ -45,7 +50,7 @@ public final class ScriptMagic {
         }
 
         try {
-            CastHandle handle = WizardryCasting.start(caster, spell, level, target);
+            CastHandle handle = WizardryCasting.start(caster, spell, level, target, durationTicks);
             if (handle == null) return false;
             ACTIVE.put(caster, new Session(handle, target));
             return true;

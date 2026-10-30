@@ -12,6 +12,7 @@ import net.minecraft.init.MobEffects;
 import net.minecraft.item.EnumAction;
 import net.minecraft.potion.PotionEffect;
 import net.minecraft.util.EnumHand;
+import net.minecraft.util.EnumParticleTypes;
 import net.minecraft.world.World;
 import noppes.npcs.entity.EntityNPCInterface;
 import org.spongepowered.asm.mixin.Mixin;
@@ -32,6 +33,17 @@ public abstract class MixinShieldSpells extends Spell {
     public boolean cast(World world, EntityLiving caster, EnumHand hand, int ticks,
                         EntityLivingBase target, SpellModifiers modifiers) {
         if (!(caster instanceof EntityNPCInterface)) return false;
+        if ((Object) this == Spells.shadow_ward) {
+            if (world.isRemote) {
+                double dx = -1 + 2 * world.rand.nextFloat();
+                double dy = -1 + world.rand.nextFloat();
+                double dz = -1 + 2 * world.rand.nextFloat();
+                world.spawnParticle(EnumParticleTypes.PORTAL, caster.posX,
+                    caster.posY + caster.getEyeHeight(), caster.posZ, dx, dy, dz);
+            }
+            if (ticks % 50 == 0) playSound(world, caster, ticks, -1, modifiers);
+            return true;
+        }
         if ((Object) this == Spells.shield && !world.isRemote) {
             caster.addPotionEffect(new PotionEffect(MobEffects.RESISTANCE, 10,
                 getProperty(EFFECT_STRENGTH).intValue(), false, false));
@@ -45,7 +57,6 @@ public abstract class MixinShieldSpells extends Spell {
                 world.spawnEntity(shield);
             }
         }
-        // Native ShadowWard's attack listener already supports ISpellCaster entities.
         playSound(world, caster, ticks, -1, modifiers);
         return true;
     }

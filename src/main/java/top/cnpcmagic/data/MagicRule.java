@@ -10,12 +10,15 @@ public final class MagicRule {
     public static final int MAX_CASTS = 100;
     public static final int MAX_COOLDOWN_TICKS = 72000;
     public static final int MAX_RANGE = 64;
+    public static final int DEFAULT_DURATION_TICKS = 50;
+    public static final int MAX_DURATION_TICKS = 72000;
 
     public String spellId = "";
     public int level = 1;
     public int casts = 3;
     public int cooldownTicks = 200;
     public int range = 6;
+    public int durationTicks = DEFAULT_DURATION_TICKS;
     public boolean enabled;
     public boolean independent;
 
@@ -26,6 +29,7 @@ public final class MagicRule {
         tag.setInteger("casts", casts);
         tag.setInteger("cooldown", cooldownTicks);
         tag.setInteger("range", range);
+        tag.setInteger("duration", durationTicks);
         tag.setBoolean("enabled", enabled);
         tag.setBoolean("independent", independent);
         return tag;
@@ -38,6 +42,8 @@ public final class MagicRule {
         rule.casts = tag.hasKey("casts", 3) ? tag.getInteger("casts") : 3;
         rule.cooldownTicks = tag.hasKey("cooldown", 3) ? tag.getInteger("cooldown") : 200;
         rule.range = tag.hasKey("range", 3) ? tag.getInteger("range") : 6;
+        rule.durationTicks = tag.hasKey("duration", 3)
+            ? MathHelper.clamp(tag.getInteger("duration"), 1, MAX_DURATION_TICKS) : DEFAULT_DURATION_TICKS;
         rule.enabled = tag.getBoolean("enabled");
         rule.independent = tag.getBoolean("independent");
         return rule;
@@ -52,6 +58,7 @@ public final class MagicRule {
         casts = MathHelper.clamp(casts, 1, MAX_CASTS);
         cooldownTicks = MathHelper.clamp(cooldownTicks, 0, MAX_COOLDOWN_TICKS);
         range = MathHelper.clamp(range, 1, MAX_RANGE);
+        durationTicks = MathHelper.clamp(durationTicks, 1, MAX_DURATION_TICKS);
         return this;
     }
 }

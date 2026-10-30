@@ -16,6 +16,7 @@ import top.cnpcmagic.wizardry.MagicCasterAccess;
 public abstract class MixinEntityNPCInterface implements ISpellCaster, MagicCasterAccess {
     @Unique private Spell cnpcmagic$continuousSpell = Spells.none;
     @Unique private int cnpcmagic$spellCounter;
+    @Unique private int cnpcmagic$spellTargetId = -1;
     @Unique private SpellModifiers cnpcmagic$modifiers = new SpellModifiers();
     @Unique private EntityShield cnpcmagic$shield;
 
@@ -56,4 +57,6 @@ public abstract class MixinEntityNPCInterface implements ISpellCaster, MagicCast
 
     @Override public EntityShield cnpcmagic$getShield() { return cnpcmagic$shield; }
     @Override public void cnpcmagic$setShield(EntityShield shield) { cnpcmagic$shield = shield; }
+    @Override public int cnpcmagic$getSpellTargetId() { return cnpcmagic$spellTargetId; }
+    @Override public void cnpcmagic$setSpellTargetId(int targetId) { cnpcmagic$spellTargetId = targetId; }
 }

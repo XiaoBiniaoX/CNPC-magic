@@ -15,6 +15,11 @@ public abstract class MixinScriptCarrierMagic {
     }
 
     @Unique
+    public boolean castSpell(Object caster, String spellId, int level, Object target, int durationTicks) {
+        return ScriptMagic.cast(caster, spellId, level, target, durationTicks);
+    }
+
+    @Unique
     public boolean isCastingSpell(Object caster) {
         return ScriptMagic.isCasting(caster);
     }

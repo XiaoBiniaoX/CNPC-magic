@@ -14,6 +14,11 @@ public abstract class MixinLivingScriptMagic {
     }
 
     @Unique
+    public boolean castSpell(String spellId, int level, Object target, int durationTicks) {
+        return ScriptMagic.cast(this, spellId, level, target, durationTicks);
+    }
+
+    @Unique
     public boolean isCastingSpell() {
         return ScriptMagic.isCasting(this);
     }
