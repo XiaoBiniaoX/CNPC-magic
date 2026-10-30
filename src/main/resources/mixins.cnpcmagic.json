@@ -1,0 +1,16 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "top.cnpcmagic.mixin",
+  "compatibilityLevel": "JAVA_17",
+  "refmap": "cnpcmagic.refmap.json",
+  "mixins": [
+    "MixinGoetyScriptTarget",
+    "MixinLivingScriptMagic",
+    "MixinScriptCarrierMagic"
+  ],
+  "client": [
+    "MixinGuiNpcMenu",
+    "MixinNpcAnimationRenderer"
+  ]
+}

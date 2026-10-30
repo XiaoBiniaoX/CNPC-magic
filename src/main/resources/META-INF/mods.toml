@@ -1,0 +1,59 @@
+modLoader="javafml"
+loaderVersion="[47,)"
+
+license="NC"
+
+[[mods]]
+modId="cnpcmagic"
+version="1.0.0"
+displayName="CNPC魔法拓展"
+displayURL="https://space.bilibili.com/353609880"
+authors="XiaoBiniaoX"
+description='''为 Custom NPCs 的 NPC 编辑界面增加“魔法”页签：
+每个魔法体系可添加多条独立法术，配置等级、每轮次数、冷却与触发距离。
+可选支持铁魔法与诡厄巫法；必需 player-animation-lib，支持人形 NPC 施法动画。'''
+
+# 基础依赖
+[[dependencies.cnpcmagic]]
+    modId="forge"
+    mandatory=true
+    versionRange="[47,)"
+    ordering="NONE"
+    side="BOTH"
+
+[[dependencies.cnpcmagic]]
+    modId="minecraft"
+    mandatory=true
+    versionRange="[1.20.1,1.21)"
+    ordering="NONE"
+    side="BOTH"
+
+# CustomNPCs 依赖
+[[dependencies.cnpcmagic]]
+    modId="customnpcs"
+    mandatory=true
+    versionRange="[1,)"
+    ordering="NONE"
+    side="BOTH"
+
+# 铁魔法：可选依赖，未安装时不注册对应 provider
+[[dependencies.cnpcmagic]]
+    modId="irons_spellbooks"
+    mandatory=false
+    versionRange="[1,)"
+    ordering="AFTER"
+    side="BOTH"
+
+[[dependencies.cnpcmagic]]
+    modId="playeranimator"
+    mandatory=true
+    versionRange="[1.0.2-rc1+1.20,)"
+    ordering="AFTER"
+    side="BOTH"
+
+[[dependencies.cnpcmagic]]
+    modId="goety"
+    mandatory=false
+    versionRange="[2.5.60.0,)"
+    ordering="AFTER"
+    side="BOTH"
