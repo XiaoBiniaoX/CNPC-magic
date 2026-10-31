@@ -58,7 +58,7 @@ public final class MagicCombatHandler {
         }
 
         long now = npc.world.getTotalWorldTime();
-        List<MagicRule> rules = MagicDataStore.get(npc.getServer()).getRules(npc.getUniqueID());
+        List<MagicRule> rules = MagicDataStore.get(npc.getServer()).getRules(npc);
         List<MagicRule> ordered = new ArrayList<>();
         for (MagicRule rule : rules) if (!rule.independent) ordered.add(rule);
         tickOrdered(npc, target, state, now, ordered);

@@ -21,7 +21,7 @@ public final class MagicSync {
 
         NBTTagCompound providers = new NBTTagCompound();
         providers.setTag(MagicDataStore.PROVIDER_ID,
-            MagicDataStore.writeRules(MagicDataStore.get(player.getServer()).getRules(npc.getUniqueID())));
+            MagicDataStore.writeRules(MagicDataStore.get(player.getServer()).getRules(npc)));
         NBTTagCompound root = new NBTTagCompound();
         root.setTag("providers", providers);
         Server.sendDataChecked(player, EnumPacketClient.GUI_DATA, root);
@@ -35,7 +35,7 @@ public final class MagicSync {
         if (!providers.hasKey(MagicDataStore.PROVIDER_ID)) return;
         List<MagicRule> rules = MagicDataStore.readRules(providers.getTag(MagicDataStore.PROVIDER_ID));
         for (MagicRule rule : rules) rule.sanitize(npc);
-        MagicDataStore.get(player.getServer()).setRules(npc.getUniqueID(), rules);
+        MagicDataStore.get(player.getServer()).setRules(npc, rules);
         MagicCombatHandler.reset(npc);
     }
 

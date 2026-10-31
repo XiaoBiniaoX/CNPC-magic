@@ -44,11 +44,30 @@ public final class MagicDataStore extends WorldSavedData {
         return rules == null ? Collections.emptyList() : rules;
     }
 
+    public List<MagicRule> getRules(noppes.npcs.entity.EntityNPCInterface npc) {
+        return getRules(dataId(npc));
+    }
+
+    public void setRules(noppes.npcs.entity.EntityNPCInterface npc, List<MagicRule> rules) {
+        UUID previous = dataId(npc);
+        // Reuse unchanged snapshots; saving a GUI or serializing an NPC must not grow the store.
+        if (writeRules(getRules(previous)).equals(writeRules(rules))) return;
+        UUID next = UUID.randomUUID();
+        setRules(next, rules);
+        ((MagicDataAccess) npc).cnpcmagic$setDataId(next);
+        // Keep the previous snapshot: a soulstone or stored clone may still reference it.
+    }
+
+    private static UUID dataId(noppes.npcs.entity.EntityNPCInterface npc) {
+        UUID reference = ((MagicDataAccess) npc).cnpcmagic$getDataId();
+        return reference == null ? npc.getUniqueID() : reference;
+    }
+
     public void setRules(UUID npcId, List<MagicRule> rules) {
         if (rules.isEmpty()) {
             data.remove(npcId);
         } else {
-            data.put(npcId, new ArrayList<>(rules));
+            data.put(npcId, readRules(writeRules(rules)));
         }
         markDirty();
     }
