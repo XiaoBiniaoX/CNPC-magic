@@ -8,6 +8,7 @@
     "MixinGoetyScriptTarget",
     "MixinIronCastData",
     "MixinLivingScriptMagic",
+    "MixinNpcDataReference",
     "MixinScriptCarrierMagic"
   ],
   "client": [

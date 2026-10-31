@@ -17,6 +17,20 @@ public class MagicRule {
     public boolean enabled = false;
     public boolean independent = false;
 
+    @Override
+    public boolean equals(Object other) {
+        if (this == other) return true;
+        if (!(other instanceof MagicRule rule)) return false;
+        return level == rule.level && casts == rule.casts && cooldownTicks == rule.cooldownTicks
+            && range == rule.range && enabled == rule.enabled && independent == rule.independent
+            && java.util.Objects.equals(spellId == null ? "" : spellId, rule.spellId == null ? "" : rule.spellId);
+    }
+
+    @Override
+    public int hashCode() {
+        return java.util.Objects.hash(spellId, level, casts, cooldownTicks, range, enabled, independent);
+    }
+
     public CompoundTag save() {
         CompoundTag tag = new CompoundTag();
         tag.putString("spell", spellId == null ? "" : spellId);

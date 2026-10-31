@@ -5,6 +5,7 @@ import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.world.level.saveddata.SavedData;
+import noppes.npcs.entity.EntityNPCInterface;
 
 import java.util.HashMap;
 import java.util.ArrayList;
@@ -49,6 +50,66 @@ public class MagicDataStore extends SavedData {
     public List<MagicRule> getRules(UUID npc, String providerId) {
         Map<String, List<MagicRule>> rules = data.get(npc);
         return rules == null ? List.of() : rules.getOrDefault(providerId, List.of());
+    }
+
+    public List<MagicRule> getRules(EntityNPCInterface npc, String providerId) {
+        return getRules(dataId(npc), providerId);
+    }
+
+    public static UUID dataId(EntityNPCInterface npc) {
+        if (npc instanceof MagicDataAccess access) {
+            UUID reference = access.cnpcmagic$getDataId();
+            if (reference != null) {
+                return reference;
+            }
+        }
+        return npc.getUUID();
+    }
+
+    /**
+     * Saves a full provider snapshot for this NPC. Unchanged content keeps the current
+     * snapshot; a real change writes a new one and moves the NPC's reference, so copies
+     * already stored in soulstones or clone lists keep the configuration they captured.
+     */
+    public void apply(EntityNPCInterface npc, Map<String, List<MagicRule>> providers) {
+        if (!(npc instanceof MagicDataAccess access)) {
+            // Without the reference mixin, keep the old per-UUID behaviour instead of failing.
+            for (Map.Entry<String, List<MagicRule>> entry : providers.entrySet()) {
+                setRules(npc.getUUID(), entry.getKey(), entry.getValue());
+            }
+            return;
+        }
+        UUID current = dataId(npc);
+        Map<String, List<MagicRule>> existing = normalize(data.get(current));
+        Map<String, List<MagicRule>> merged = new HashMap<>(existing);
+        for (Map.Entry<String, List<MagicRule>> entry : providers.entrySet()) {
+            if (entry.getValue() == null || entry.getValue().isEmpty()) {
+                merged.remove(entry.getKey());
+            } else {
+                merged.put(entry.getKey(), List.copyOf(entry.getValue()));
+            }
+        }
+        if (merged.equals(existing)) {
+            return;
+        }
+        UUID id = UUID.randomUUID();
+        if (!merged.isEmpty()) {
+            data.put(id, merged);
+        }
+        access.cnpcmagic$setDataId(id);
+        setDirty(true);
+    }
+
+    private static Map<String, List<MagicRule>> normalize(Map<String, List<MagicRule>> providers) {
+        Map<String, List<MagicRule>> result = new HashMap<>();
+        if (providers != null) {
+            for (Map.Entry<String, List<MagicRule>> entry : providers.entrySet()) {
+                if (entry.getValue() != null && !entry.getValue().isEmpty()) {
+                    result.put(entry.getKey(), List.copyOf(entry.getValue()));
+                }
+            }
+        }
+        return result;
     }
 
     public void setRules(UUID npc, String providerId, List<MagicRule> rules) {

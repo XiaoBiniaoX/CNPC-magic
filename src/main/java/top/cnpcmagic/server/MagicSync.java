@@ -12,7 +12,9 @@ import top.cnpcmagic.data.MagicRule;
 import top.cnpcmagic.provider.MagicProvider;
 import top.cnpcmagic.provider.MagicProviders;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 public final class MagicSync {
     private MagicSync() {
@@ -26,7 +28,7 @@ public final class MagicSync {
         MagicDataStore store = MagicDataStore.get(player.server);
         CompoundTag providers = new CompoundTag();
         for (MagicProvider provider : MagicProviders.all()) {
-            providers.put(provider.getId(), MagicDataStore.saveRules(store.getRules(npc.getUUID(), provider.getId())));
+            providers.put(provider.getId(), MagicDataStore.saveRules(store.getRules(npc, provider.getId())));
         }
         CompoundTag tag = new CompoundTag();
         tag.put("providers", providers);
@@ -43,14 +45,16 @@ public final class MagicSync {
         }
         MagicDataStore store = MagicDataStore.get(player.server);
         CompoundTag providers = tag.getCompound("providers");
+        Map<String, List<MagicRule>> updated = new HashMap<>();
         for (MagicProvider provider : MagicProviders.all()) {
             if (!providers.contains(provider.getId())) {
                 continue;
             }
             List<MagicRule> rules = MagicDataStore.loadRules(providers.get(provider.getId()));
             rules.forEach(rule -> rule.sanitize(provider));
-            store.setRules(npc.getUUID(), provider.getId(), rules);
+            updated.put(provider.getId(), rules);
         }
+        store.apply(npc, updated);
         MagicCombatHandler.reset(npc);
     }
 }

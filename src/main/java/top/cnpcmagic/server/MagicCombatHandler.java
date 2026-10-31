@@ -52,7 +52,7 @@ public final class MagicCombatHandler {
         MagicDataStore store = MagicDataStore.get(npc.level().getServer());
         List<Entry> entries = new ArrayList<>();
         for (MagicProvider provider : MagicProviders.all()) {
-            for (MagicRule rule : store.getRules(npc.getUUID(), provider.getId())) entries.add(new Entry(provider, rule));
+            for (MagicRule rule : store.getRules(npc, provider.getId())) entries.add(new Entry(provider, rule));
         }
         tickOrdered(npc, target, state, now, entries.stream().filter(e -> !e.rule.independent).toList());
         tickIndependent(npc, target, state, now, entries);
