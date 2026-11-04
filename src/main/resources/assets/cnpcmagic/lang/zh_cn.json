@@ -23,5 +23,7 @@
   "cnpcmagic.gui.selectSpell": "选择法术",
   "cnpcmagic.provider.irons_spellbooks": "铁魔法",
   "cnpcmagic.provider.goety": "诡厄巫法",
+  "cnpcmagic.provider.ebwizardry": "巫术学",
+  "cnpcmagic.provider.ars_nouveau": "新生魔艺",
   "cnpcmagic.gui.goetyLevel": "等级(效能)"
 }

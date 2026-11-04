@@ -97,7 +97,7 @@ public final class MagicVerification {
     @SubscribeEvent
     public static void onStarted(ServerStartedEvent event) {
         try {
-            for (String id : List.of("irons_spellbooks", "goety")) {
+            for (String id : List.of("irons_spellbooks", "goety", "ebwizardry", "ars_nouveau")) {
                 check((MagicProviders.get(id) != null) == ModList.get().isLoaded(id), "optional provider " + id);
             }
             CNPCMagic.LOGGER.info("VERIFY PASS installed providers {}", MagicProviders.all().stream().map(MagicProvider::getId).toList());

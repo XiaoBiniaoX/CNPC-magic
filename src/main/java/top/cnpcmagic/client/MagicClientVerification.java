@@ -72,7 +72,7 @@ public final class MagicClientVerification {
                 CNPCMagic.LOGGER.error("VERIFY CLIENT FAIL language", e);
             }
             boolean valid = true;
-            for (String id : java.util.List.of("irons_spellbooks", "goety")) {
+            for (String id : java.util.List.of("irons_spellbooks", "goety", "ebwizardry", "ars_nouveau")) {
                 ClientMagicProvider provider = ClientMagicProviders.get(id);
                 valid &= (provider != null) == ModList.get().isLoaded(id);
                 if (provider != null) valid &= !provider.getSpellIds().isEmpty();
@@ -101,7 +101,7 @@ public final class MagicClientVerification {
         var resource = mc.getResourceManager().getResource(new ResourceLocation(CNPCMagic.MODID, "lang/" + language + ".json")).orElseThrow();
         try (var reader = new InputStreamReader(resource.open(), StandardCharsets.UTF_8)) {
             var translations = JsonParser.parseReader(reader).getAsJsonObject();
-            require(translations.size() == 25, "complete translation key set");
+            require(translations.size() == 27, "complete translation key set");
             for (var entry : translations.entrySet()) {
                 require(Component.translatable(entry.getKey()).getString().equals(entry.getValue().getAsString()),
                     "Minecraft loaded translation " + entry.getKey());
@@ -115,7 +115,7 @@ public final class MagicClientVerification {
         require(mc.font.width(Component.translatable("cnpcmagic.gui.addHint")) <= 196, "empty spell list hint fits panel");
         require(mc.font.width(Component.translatable("cnpcmagic.gui.add")) <= 48, "add button text fits");
         require(mc.font.width(Component.translatable("cnpcmagic.gui.remove")) <= 48, "remove button text fits");
-        CNPCMagic.LOGGER.info("VERIFY CLIENT PASS language={} keys=25 layout=true", language);
+        CNPCMagic.LOGGER.info("VERIFY CLIENT PASS language={} keys=27 layout=true", language);
     }
 
     private static void selectProvider(String id) {
@@ -126,7 +126,8 @@ public final class MagicClientVerification {
 
     private static void selectSecond(ClientMagicProvider provider) {
         GuiCustomScrollNop scroll = gui.getWrapper().scrolls.get(101);
-        String id = provider.getId() + (provider.getId().equals("goety") ? ":soul_bolt_focus" : ":firebolt");
+        // Provider-agnostic: the second entry is whatever this provider actually lists.
+        String id = provider.getSpellIds().get(1);
         scroll.setSelected("2. " + provider.getDisplayName(id));
         gui.scrollClicked(0, 0, 0, scroll);
     }

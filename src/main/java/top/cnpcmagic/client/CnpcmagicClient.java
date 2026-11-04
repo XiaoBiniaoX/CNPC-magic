@@ -8,6 +8,8 @@ import net.minecraftforge.fml.event.lifecycle.FMLClientSetupEvent;
 import top.cnpcmagic.CNPCMagic;
 import top.cnpcmagic.client.compat.iron.IronClientProvider;
 import top.cnpcmagic.client.compat.goety.GoetyClientProvider;
+import top.cnpcmagic.client.compat.ebwizardry.EbWizardryClientProvider;
+import top.cnpcmagic.client.compat.ars.ArsClientProvider;
 import top.cnpcmagic.client.provider.ClientMagicProviders;
 
 @Mod.EventBusSubscriber(modid = CNPCMagic.MODID, value = Dist.CLIENT, bus = Mod.EventBusSubscriber.Bus.MOD)
@@ -27,6 +29,20 @@ public final class CnpcmagicClient {
             }
             if (ModList.get().isLoaded("goety")) {
                 ClientMagicProviders.register(new GoetyClientProvider());
+            }
+            if (ModList.get().isLoaded("ebwizardry")) {
+                try {
+                    ClientMagicProviders.register(new EbWizardryClientProvider());
+                } catch (Throwable t) {
+                    CNPCMagic.LOGGER.error("Failed to register Wizardry client provider", t);
+                }
+            }
+            if (ModList.get().isLoaded("ars_nouveau")) {
+                try {
+                    ClientMagicProviders.register(new ArsClientProvider());
+                } catch (Throwable t) {
+                    CNPCMagic.LOGGER.error("Failed to register Ars Nouveau client provider", t);
+                }
             }
         });
     }

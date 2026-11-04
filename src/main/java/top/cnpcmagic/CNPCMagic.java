@@ -10,6 +10,8 @@ import net.minecraftforge.common.MinecraftForge;
 import org.slf4j.Logger;
 import top.cnpcmagic.compat.iron.IronProvider;
 import top.cnpcmagic.compat.goety.GoetyProvider;
+import top.cnpcmagic.compat.ebwizardry.EbWizardryProvider;
+import top.cnpcmagic.compat.ars.ArsProvider;
 import top.cnpcmagic.network.NetworkHandler;
 import top.cnpcmagic.provider.MagicProviders;
 import top.cnpcmagic.server.MagicCombatHandler;
@@ -38,6 +40,20 @@ public class CNPCMagic {
             MinecraftForge.EVENT_BUS.register(MagicCombatHandler.class);
             if (ModList.get().isLoaded("goety")) {
                 MagicProviders.register(new GoetyProvider());
+            }
+            if (ModList.get().isLoaded("ebwizardry")) {
+                try {
+                    MagicProviders.register(new EbWizardryProvider());
+                } catch (Throwable t) {
+                    LOGGER.error("Failed to register Wizardry provider", t);
+                }
+            }
+            if (ModList.get().isLoaded("ars_nouveau")) {
+                try {
+                    MagicProviders.register(new ArsProvider());
+                } catch (Throwable t) {
+                    LOGGER.error("Failed to register Ars Nouveau provider", t);
+                }
             }
             MinecraftForge.EVENT_BUS.register(NpcAnimationSync.class);
             MinecraftForge.EVENT_BUS.register(top.cnpcmagic.server.ScriptMagic.class);

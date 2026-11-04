@@ -23,5 +23,7 @@
   "cnpcmagic.gui.selectSpell": "魔法を選択",
   "cnpcmagic.provider.irons_spellbooks": "鉄の魔法書",
   "cnpcmagic.provider.goety": "Goety",
+  "cnpcmagic.provider.ebwizardry": "ウィザードリィ",
+  "cnpcmagic.provider.ars_nouveau": "アルス・ノーヴォ",
   "cnpcmagic.gui.goetyLevel": "レベル（効力）"
 }

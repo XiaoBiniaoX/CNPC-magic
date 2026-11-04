@@ -11,7 +11,8 @@ displayURL="https://space.bilibili.com/353609880"
 authors="XiaoBiniaoX"
 description='''为 Custom NPCs 的 NPC 编辑界面增加“魔法”页签：
 每个魔法体系可添加多条独立法术，配置等级、每轮次数、冷却与触发距离。
-可选支持铁魔法与诡厄巫法；必需 player-animation-lib，支持人形 NPC 施法动画。'''
+必需 CNPC增强（cnpcplus）与 player-animation-lib，支持人形 NPC 施法动画。
+可选支持铁魔法、诡厄巫法、巫术学与新生魔艺。'''
 
 # 基础依赖
 [[dependencies.cnpcmagic]]
@@ -48,6 +49,30 @@ description='''为 Custom NPCs 的 NPC 编辑界面增加“魔法”页签：
     modId="playeranimator"
     mandatory=true
     versionRange="[1.0.2-rc1+1.20,)"
+    ordering="AFTER"
+    side="BOTH"
+
+# CNPC 增强：硬依赖，未安装时拒绝启动
+[[dependencies.cnpcmagic]]
+    modId="cnpcplus"
+    mandatory=true
+    versionRange="[4.0.6,)"
+    ordering="AFTER"
+    side="BOTH"
+
+# 巫术学：可选依赖，未安装时不注册对应 provider
+[[dependencies.cnpcmagic]]
+    modId="ebwizardry"
+    mandatory=false
+    versionRange="[0.8.10,)"
+    ordering="AFTER"
+    side="BOTH"
+
+# 新生魔艺：可选依赖，未安装时不注册对应 provider
+[[dependencies.cnpcmagic]]
+    modId="ars_nouveau"
+    mandatory=false
+    versionRange="[4.12.7,)"
     ordering="AFTER"
     side="BOTH"
 

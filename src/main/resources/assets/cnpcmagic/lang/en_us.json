@@ -23,5 +23,7 @@
   "cnpcmagic.gui.selectSpell": "Select Spell",
   "cnpcmagic.provider.irons_spellbooks": "Iron's Spellbooks",
   "cnpcmagic.provider.goety": "Goety",
+  "cnpcmagic.provider.ebwizardry": "Electroblob's Wizardry",
+  "cnpcmagic.provider.ars_nouveau": "Ars Nouveau",
   "cnpcmagic.gui.goetyLevel": "Level (potency)"
 }
