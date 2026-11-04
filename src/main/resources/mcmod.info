@@ -11,6 +11,6 @@
   "credits": "Noppes (CustomNPCs), Electroblob (Electroblob's Wizardry)",
   "logoFile": "",
   "screenshots": [],
-  "dependencies": ["mixinbooter", "customnpcs", "ebwizardry"]
+  "dependencies": ["mixinbooter", "customnpcs", "ebwizardry", "cnpcplus"]
 }
 ]

@@ -12,12 +12,12 @@ import top.cnpcmagic.server.ScriptMagic;
     modid = CNPCMagic.MOD_ID,
     name = CNPCMagic.NAME,
     version = CNPCMagic.VERSION,
-    dependencies = "required-after:mixinbooter@[10.7,);required-after:customnpcs@[1.12,);required-after:ebwizardry@[4.3.19]"
+    dependencies = "required-after:mixinbooter@[10.7,);required-after:customnpcs@[1.12,);required-after:ebwizardry@[4.3.19];required-after:cnpcplus"
 )
 public final class CNPCMagic {
     public static final String MOD_ID = "cnpcmagic";
     public static final String NAME = "CNPC Magic";
-    public static final String VERSION = "1.1.0";
+    public static final String VERSION = "1.2.0";
 
     public static Logger LOGGER;
 
