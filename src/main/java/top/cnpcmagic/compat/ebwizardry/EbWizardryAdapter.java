@@ -12,10 +12,13 @@ import com.binaris.wizardry.core.networking.s2c.NPCSpellCastS2C;
 import com.binaris.wizardry.core.platform.Services;
 import com.binaris.wizardry.setup.registries.Spells;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.Vec3;
 import top.cnpcmagic.CNPCMagic;
 import top.cnpcmagic.provider.MagicCast;
 import top.cnpcmagic.server.NpcAnimationSync;
@@ -52,6 +55,14 @@ public final class EbWizardryAdapter {
 
     public static int getMaxLevel(String id) {
         return getSpell(id) == null ? 1 : MAX_LEVEL;
+    }
+
+    /** Aim just inside the support's collision surface, including slabs and chests. */
+    public static Vec3 targetSurface(LivingEntity target) {
+        BlockPos pos = BlockPos.containing(target.getX(), target.getY() - 0.05, target.getZ());
+        var shape = target.level().getBlockState(pos).getCollisionShape(target.level(), pos);
+        double y = shape.isEmpty() ? target.getY() : pos.getY() + shape.max(Direction.Axis.Y);
+        return new Vec3(target.getX(), y - 0.0001, target.getZ());
     }
 
     public static MagicCast startCast(LivingEntity caster, String id, int level, LivingEntity target) {

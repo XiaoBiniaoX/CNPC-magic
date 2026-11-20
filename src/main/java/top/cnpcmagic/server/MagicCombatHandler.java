@@ -230,6 +230,8 @@ public final class MagicCombatHandler {
     public static void onEntityLeave(EntityLeaveLevelEvent event) {
         if (!event.getLevel().isClientSide() && event.getEntity() instanceof EntityNPCInterface npc) {
             reset(npc);
+            if (npc.getRemovalReason() != null && npc.getRemovalReason().shouldDestroy())
+                top.cnpcmagic.data.MagicRuntimeData.get(npc.getServer()).removeSoulbound(npc.getUUID());
         }
     }
 

@@ -181,12 +181,16 @@ public final class MagicPreview {
             try { if (cast != null) cast.cancel(npc); }
             catch (RuntimeException | LinkageError error) { top.cnpcmagic.CNPCMagic.LOGGER.error("Preview adapter failed to clean up", error); }
             cast = null;
+            if (npc != null && target != null && top.cnpcmagic.provider.MagicProviders.get("ebwizardry") != null)
+                top.cnpcmagic.compat.ebwizardry.EbWizardryPreview.clear(npc, target);
             for (Entity entity : entities(arena)) if (owner.equals(OWNERS.get(entity.getUUID()))) entity.discard();
             OWNERS.entrySet().removeIf(entry -> entry.getValue().equals(owner));
         }
         boolean spawn(UUID owner) {
+            boolean wizardry = spell.startsWith("ebwizardry:");
+            if (wizardry) top.cnpcmagic.compat.ebwizardry.EbWizardryPreview.resetArena(arena, origin);
             if (!(original.getType().create(arena) instanceof EntityNPCInterface copy)) return false;
-            target = EntityType.HUSK.create(arena);
+            target = (wizardry && !spell.equals("ebwizardry:ray_of_purification") ? EntityType.PILLAGER : EntityType.HUSK).create(arena);
             if (target == null) return false;
             npc = copy;
             npc.readSpawnData(original.writeSpawnData().copy()); npc.setUUID(UUID.randomUUID()); npc.setNoAi(true);
@@ -195,10 +199,17 @@ public final class MagicPreview {
             npc.moveTo(origin.getX(), 80, 0, -90, 0); npc.setYHeadRot(-90); npc.setYBodyRot(-90); npc.setHealth(npc.getMaxHealth());
             target.setNoAi(true); target.getAttribute(Attributes.MAX_HEALTH).setBaseValue(1000); target.setHealth(1000);
             target.setCustomName(net.minecraft.network.chat.Component.literal("Target")); target.setPersistenceRequired();
-            target.moveTo(origin.getX() + (meleeFollowup ? 1.1 : 6), 80, 0, 90, 0);
+            double distance = meleeFollowup ? 1.1 : wizardry ? top.cnpcmagic.compat.ebwizardry.EbWizardryPreview.targetDistance(spell) : 6;
+            target.moveTo(origin.getX() + distance, 80, 0, 90, 0);
+            if (wizardry) top.cnpcmagic.compat.ebwizardry.EbWizardryPreview.prepare(spell, npc, target);
             OWNERS.put(npc.getUUID(), owner); OWNERS.put(target.getUUID(), owner);
             npc.setTarget(target); MagicCombatHandler.face(npc, target);
-            return arena.addFreshEntity(npc) && arena.addFreshEntity(target);
+            if (!arena.addFreshEntity(npc) || !arena.addFreshEntity(target)) return false;
+            if (spell.equals("ebwizardry:font_of_mana")) {
+                Entity recipient = top.cnpcmagic.compat.ebwizardry.EbWizardryPreview.manaRecipient(npc);
+                OWNERS.put(recipient.getUUID(), owner);
+            }
+            return true;
         }
     }
 }

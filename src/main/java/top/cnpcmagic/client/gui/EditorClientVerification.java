@@ -32,6 +32,9 @@ public final class EditorClientVerification {
     private static int suppressedProgressScreens;
     private static boolean loadingScreenEscaped;
     private static int wizardrySigils;
+    private static final String[] WIZARDRY_PREVIEWS = {"fire_sigil", "detonate", "enrage", "entrapment", "heal", "frost_ray", "cobwebs", "ice_spikes", "arcane_lock", "font_of_mana", "frost_sigil"};
+    private static int wizardryIndex;
+    private static java.util.UUID wizardryActor;
 
     @SubscribeEvent
     public static void joined(net.minecraftforge.event.entity.EntityJoinLevelEvent event) {
@@ -149,7 +152,8 @@ public final class EditorClientVerification {
         ticks++;
         try {
             check(!loadingScreenEscaped, "preview loading screen was cancelled before display");
-            if (ticks > 1800) throw new IllegalStateException("Editor screenshot fixture timed out at stage " + stage);
+            if (ticks > (Boolean.getBoolean("cnpcmagic.verify.wizardryEditor") ? 5000 : 1800))
+                throw new IllegalStateException("Editor screenshot fixture timed out at stage " + stage + " spell=" + WIZARDRY_PREVIEWS[wizardryIndex]);
             if (ticks < 160) return;
             if (ticks - at < 8) return;
             if (Boolean.getBoolean("cnpcmagic.verify.wizardryEditor") && stage >= 2) {
@@ -165,16 +169,42 @@ public final class EditorClientVerification {
                         if (editor.picker == null || !editor.picker.active
                             || !mc.level.dimension().location().toString().equals("cnpcmagic:preview")) return;
                         check(mc.screen == editor && MagicEditor.isPreviewTransitionActive(), "Wizardry preview retains editor");
-                        check(editor.picker.selected.equals("ebwizardry:fire_sigil") && editor.picker.level.equals("1")
+                        String selected = "ebwizardry:" + WIZARDRY_PREVIEWS[wizardryIndex];
+                        check(editor.picker.selected.equals(selected) && editor.picker.level.equals("1")
                             && editor.picker.hasProperties(), "Wizardry selected spell and properties retained");
-                        boolean damaged = java.util.stream.StreamSupport.stream(mc.level.entitiesForRendering().spliterator(), false)
-                            .anyMatch(entity -> entity instanceof net.minecraft.world.entity.LivingEntity living
-                                && living.getName().getString().equals("Target") && living.getHealth() < living.getMaxHealth());
-                        if (wizardrySigils < (stage == 3 ? 1 : 2) || !damaged) return;
-                        shot(stage == 3 ? "02-wizardry-fire-sigil" : "03-wizardry-replay", editor);
+                        var actors = java.util.stream.StreamSupport.stream(mc.level.entitiesForRendering().spliterator(), false).toList();
+                        var caster = actors.stream().filter(entity -> entity instanceof EntityNPCInterface && entity.getName().getString().equals("Preview"))
+                            .map(entity -> (EntityNPCInterface) entity).findFirst().orElse(null);
+                        var target = actors.stream().filter(entity -> entity instanceof net.minecraft.world.entity.Mob && entity.getName().getString().equals("Target"))
+                            .map(entity -> (net.minecraft.world.entity.Mob) entity).findFirst().orElse(null);
+                        if (caster == null || target == null || caster.getUUID().equals(wizardryActor) || ticks - at < 45) return;
+                        boolean effect = switch (WIZARDRY_PREVIEWS[wizardryIndex]) {
+                            case "entrapment" -> target.getVehicle() != null && target.getVehicle().getClass().getSimpleName().equals("BubbleConstruct");
+                            case "heal" -> caster.getHealth() > caster.getMaxHealth() / 2;
+                            case "enrage", "arcane_lock", "font_of_mana" -> true; // Launcher additionally requires each native server-side effect twice.
+                            case "cobwebs" -> java.util.stream.StreamSupport.stream(net.minecraft.core.BlockPos.betweenClosed(
+                                target.blockPosition().offset(-2, -1, -2), target.blockPosition().offset(2, 2, 2)).spliterator(), false)
+                                .anyMatch(pos -> new net.minecraft.resources.ResourceLocation("ebwizardry:vanishing_cobweb").equals(
+                                    net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(mc.level.getBlockState(pos).getBlock())));
+                            default -> target.getHealth() < target.getMaxHealth();
+                        };
+                        if (!effect || !editor.picker.status.isEmpty()) return;
+                        if (wizardryIndex == 0 && wizardrySigils < (stage == 3 ? 1 : 2)) return;
+                        wizardryActor = caster.getUUID();
+                        CNPCMagic.LOGGER.info("EDITOR CLIENT WIZARDRY PREVIEW spell={} replay={} actor={} targetHealth={} casterHealth={} vehicle={}",
+                            selected, stage == 5, wizardryActor, target.getHealth(), caster.getHealth(), target.getVehicle());
+                        shot(String.format("wizardry-%02d-%s-%s", wizardryIndex, WIZARDRY_PREVIEWS[wizardryIndex], stage == 3 ? "initial" : "replay"), editor);
                     }
                     case 4 -> press(editor, "replay");
-                    case 6 -> press(editor, "addSpell");
+                    case 6 -> {
+                        if (wizardryIndex + 1 < WIZARDRY_PREVIEWS.length) {
+                            wizardryIndex++;
+                            var search = (EditBox)editor.children().stream().filter(EditBox.class::isInstance).findFirst().orElseThrow();
+                            search.setValue("ebwizardry:" + WIZARDRY_PREVIEWS[wizardryIndex]);
+                            chooseRow(editor, 0);
+                            stage = 2;
+                        } else press(editor, "addSpell");
+                    }
                     case 7 -> {
                         if (editor.picker != null || editor.saving) return;
                         check(mc.screen == editor && !MagicEditor.isPreviewTransitionActive(), "Wizardry returns to editor and clears transition");
@@ -196,13 +226,13 @@ public final class EditorClientVerification {
                     case 9 -> {
                         if (!editor.ready()) return;
                         check(editor.rules.getOrDefault("ebwizardry", java.util.List.of()).stream()
-                            .anyMatch(rule -> rule.spellId.equals("ebwizardry:fire_sigil") && rule.level == 1),
+                            .anyMatch(rule -> rule.spellId.equals("ebwizardry:" + WIZARDRY_PREVIEWS[wizardryIndex]) && rule.level == 1),
                             "Wizardry selected draft survives save and reopen");
                         shot("05-wizardry-reopened", editor);
                     }
                     case 10 -> {
-                        CNPCMagic.LOGGER.info("EDITOR CLIENT PASS COMPLETE: WIZARDRY fire_sigil real preview, replay, damage, return, draft save and reopen; nativeSigils={}, suppressedLoadingScreens={}, suppressedProgressScreens={}",
-                            wizardrySigils, suppressedLoadingScreens, suppressedProgressScreens);
+                        CNPCMagic.LOGGER.info("EDITOR CLIENT PASS COMPLETE: WIZARDRY {} spells real preview, replay, switching, return, draft save and reopen; nativeSigils={}, suppressedLoadingScreens={}, suppressedProgressScreens={}",
+                            WIZARDRY_PREVIEWS.length, wizardrySigils, suppressedLoadingScreens, suppressedProgressScreens);
                         finished = true;
                         mc.stop();
                     }

@@ -1,15 +1,18 @@
 package top.cnpcmagic.data;
 
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.ListTag;
+import net.minecraft.nbt.Tag;
 import net.minecraft.server.MinecraftServer;
 import java.util.UUID;
 
 /** Recovery and temporary-entity metadata live outside player/entity NBT as well. */
 public final class MagicRuntimeData extends CnpcPlusData {
-    private final CompoundTag returns, summons;
+    private final CompoundTag returns, summons, soulbound;
     private MagicRuntimeData() { this(new CompoundTag()); }
     private MagicRuntimeData(CompoundTag tag) {
         super("magic_runtime"); returns = tag.getCompound("returns").copy(); summons = tag.getCompound("summons").copy();
+        soulbound = tag.getCompound("soulbound").copy();
     }
     public static MagicRuntimeData get(MinecraftServer server) {
         return CnpcPlusData.get(server, "cnpcmagic_runtime", "magic_runtime", MagicRuntimeData::new, MagicRuntimeData::new);
@@ -28,7 +31,13 @@ public final class MagicRuntimeData extends CnpcPlusData {
         catch (IllegalStateException error) { if (previous == null) summons.remove(key); else summons.put(key, previous); throw error; }
     }
     public void removeSummon(UUID entity) { if (summons.contains(entity.toString())) { summons.remove(entity.toString()); setDirty(); } }
+    public ListTag getSoulbound(UUID caster) { return soulbound.getList(caster.toString(), Tag.TAG_INT_ARRAY).copy(); }
+    public void putSoulbound(UUID caster, ListTag targets) {
+        if (targets.isEmpty()) soulbound.remove(caster.toString()); else soulbound.put(caster.toString(), targets.copy());
+        setDirty();
+    }
+    public void removeSoulbound(UUID caster) { if (soulbound.contains(caster.toString())) { soulbound.remove(caster.toString()); setDirty(); } }
     @Override public CompoundTag save(CompoundTag tag) {
-        tag.put("returns", returns.copy()); tag.put("summons", summons.copy()); tag.putInt("schema", 1); return tag;
+        tag.put("returns", returns.copy()); tag.put("summons", summons.copy()); tag.put("soulbound", soulbound.copy()); tag.putInt("schema", 2); return tag;
     }
 }

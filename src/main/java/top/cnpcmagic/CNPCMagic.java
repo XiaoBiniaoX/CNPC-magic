@@ -65,6 +65,7 @@ public class CNPCMagic {
             if (Boolean.getBoolean("cnpcmagic.verify.rewrite")) MinecraftForge.EVENT_BUS.register(top.cnpcmagic.verify.RewriteVerification.class);
             if (Boolean.getBoolean("cnpcmagic.verify.editor")) MinecraftForge.EVENT_BUS.register(top.cnpcmagic.verify.EditorVerification.class);
             if (Boolean.getBoolean("cnpcmagic.verify.wizardry")) MinecraftForge.EVENT_BUS.register(top.cnpcmagic.verify.WizardryVerification.class);
+            if (Boolean.getBoolean("cnpcmagic.verify.wizardryCatalog")) MinecraftForge.EVENT_BUS.register(top.cnpcmagic.verify.WizardryCatalogVerification.class);
             if (Boolean.getBoolean("cnpcmagic.verify")) {
                 MinecraftForge.EVENT_BUS.register(top.cnpcmagic.verify.MagicVerification.class);
                 MinecraftForge.EVENT_BUS.register(top.cnpcmagic.verify.MagicScriptVerification.class);
