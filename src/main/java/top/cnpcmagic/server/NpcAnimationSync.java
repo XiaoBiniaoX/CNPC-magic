@@ -57,6 +57,11 @@ public final class NpcAnimationSync {
         }
     }
 
+    public static Owner owner() {
+        Owner owner = INVOKING.get();
+        return owner == null ? new Owner(DEFAULT_OWNER, true) : owner;
+    }
+
     private static void send(LivingEntity npc, Animation animation) {
         int elapsed = animation == null ? 0 : (int) (npc.level().getGameTime() - animation.start);
         NetworkHandler.CHANNEL.send(PacketDistributor.TRACKING_ENTITY_AND_SELF.with(() -> npc),
@@ -108,7 +113,7 @@ public final class NpcAnimationSync {
         INVOKING.remove();
     }
 
-    private record Owner(Object token, boolean foreground) {
+    public record Owner(Object token, boolean foreground) {
     }
 
     private static final class State {

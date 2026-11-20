@@ -25,11 +25,16 @@ public class CNPCMagic {
     public CNPCMagic() {
         IEventBus modBus = FMLJavaModLoadingContext.get().getModEventBus();
         modBus.addListener(this::commonSetup);
+        top.cnpcmagic.casting.BuiltinSpell.ENTITIES.register(modBus);
         NetworkHandler.register();
     }
 
     private void commonSetup(FMLCommonSetupEvent event) {
         event.enqueueWork(() -> {
+            MagicProviders.register(new top.cnpcmagic.casting.BuiltinSpell());
+            MinecraftForge.EVENT_BUS.register(top.cnpcmagic.casting.BuiltinSpell.class);
+            MinecraftForge.EVENT_BUS.register(top.cnpcmagic.casting.CastingService.class);
+            MinecraftForge.EVENT_BUS.register(top.cnpcmagic.server.MagicPreview.class);
             if (ModList.get().isLoaded("irons_spellbooks")) {
                 try {
                     MagicProviders.register(new IronProvider());
@@ -57,6 +62,9 @@ public class CNPCMagic {
             }
             MinecraftForge.EVENT_BUS.register(NpcAnimationSync.class);
             MinecraftForge.EVENT_BUS.register(top.cnpcmagic.server.ScriptMagic.class);
+            if (Boolean.getBoolean("cnpcmagic.verify.rewrite")) MinecraftForge.EVENT_BUS.register(top.cnpcmagic.verify.RewriteVerification.class);
+            if (Boolean.getBoolean("cnpcmagic.verify.editor")) MinecraftForge.EVENT_BUS.register(top.cnpcmagic.verify.EditorVerification.class);
+            if (Boolean.getBoolean("cnpcmagic.verify.wizardry")) MinecraftForge.EVENT_BUS.register(top.cnpcmagic.verify.WizardryVerification.class);
             if (Boolean.getBoolean("cnpcmagic.verify")) {
                 MinecraftForge.EVENT_BUS.register(top.cnpcmagic.verify.MagicVerification.class);
                 MinecraftForge.EVENT_BUS.register(top.cnpcmagic.verify.MagicScriptVerification.class);

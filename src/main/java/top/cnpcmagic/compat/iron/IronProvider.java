@@ -7,6 +7,7 @@ import top.cnpcmagic.provider.MagicCast;
 
 public class IronProvider implements MagicProvider {
     public static final String ID = "irons_spellbooks";
+    public static final int EXTENDED_LEVEL_LIMIT = 100;
 
     @Override
     public String getId() {
@@ -21,7 +22,12 @@ public class IronProvider implements MagicProvider {
     @Override
     public int getMaxLevel(String spellId) {
         AbstractSpell spell = IronAdapter.getSpell(spellId);
-        return spell == null ? 0 : spell.getMaxLevel();
+        return spell == null ? 0 : Math.max(EXTENDED_LEVEL_LIMIT, spell.getMaxLevel());
+    }
+
+    @Override
+    public boolean requiresMeleeTarget(String spellId) {
+        return spellId.equals("irons_spellbooks:echoing_strikes");
     }
 
     @Override

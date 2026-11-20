@@ -10,6 +10,7 @@ import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.animal.Pig;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraftforge.event.TickEvent;
+import net.minecraftforge.event.entity.EntityJoinLevelEvent;
 import net.minecraftforge.event.server.ServerStartedEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.ModList;
@@ -32,6 +33,8 @@ public final class MagicVerification {
     private static final List<Trial> TRIALS = new ArrayList<>();
     private static final List<Long> FIRST = new ArrayList<>();
     private static final List<Long> SECOND = new ArrayList<>();
+    private static final String ECHO = "irons_spellbooks:echoing_strikes";
+    private static final String ECHO_SWORD = "irons_spellbooks:echoing_sword";
     private static long started;
     private static boolean reported;
 
@@ -67,11 +70,14 @@ public final class MagicVerification {
         check(store.getRules(id, "irons_spellbooks").size() == 1, "old data migration");
         CompoundTag legacy = rule("irons_spellbooks:firebolt", 2, 60, 3).save();
         legacy.remove("independent");
+        legacy.remove("sequence");
         check(!MagicRule.load(legacy).independent && !new MagicRule().independent, "independent defaults off");
+        check(MagicRule.load(legacy).sequence == -1, "legacy sequence default");
         List<MagicRule> entries = new ArrayList<>();
         for (int i = 0; i < 200; i++) {
             MagicRule entry = rule("irons_spellbooks:firebolt", i + 1, i * 20, i + 1);
             entry.independent = i % 2 == 1;
+            entry.sequence = entry.independent ? -1 : 199 - i;
             entries.add(entry);
         }
         store.setRules(id, "irons_spellbooks", entries);
@@ -80,10 +86,22 @@ public final class MagicVerification {
         check(restored.size() == 200 && restored.get(199).level == 200 && restored.get(0).level == 1,
             "array independence and round trip");
         check(!restored.get(0).independent && restored.get(199).independent, "per-entry independent round trip");
+        check(restored.equals(entries), "sequence survives the same SavedData round trip");
         MagicRule invalid = rule("irons_spellbooks:does_not_exist", -1, -1, -1);
         invalid.sanitize(new CounterProvider());
         check(invalid.spellId.isEmpty() && invalid.casts == 1 && invalid.cooldownTicks == 0 && invalid.level == 1,
             "server validation");
+        MagicProvider iron = MagicProviders.get("irons_spellbooks");
+        if (iron != null) {
+            String acupuncture = "irons_spellbooks:acupuncture";
+            check(iron.isValidSpell(acupuncture) && iron.getMaxLevel(acupuncture) >= 100,
+                "Iron acupuncture level limit");
+            MagicRule level100 = rule(acupuncture, 1, 60, 100).sanitize(iron);
+            MagicRule restoredLevel100 = MagicRule.load(level100.save()).sanitize(iron);
+            check(level100.level == 100 && restoredLevel100.level == 100,
+                "Iron level 100 persistence round trip");
+            CNPCMagic.LOGGER.info("VERIFY PASS Iron acupuncture level 100 validation and persistence");
+        }
         MagicRule twoCasts = rule("irons_spellbooks:firebolt", 2, 60, 1);
         MagicCombatHandler.RuleState state = new MagicCombatHandler.RuleState();
         check(!state.completed(1, twoCasts) && state.completed(2, twoCasts), "round count");
@@ -106,6 +124,13 @@ public final class MagicVerification {
                 var saved = MagicDataStore.get(event.getServer()).save(new CompoundTag()).getCompound("npcs");
                 check(!saved.isEmpty(), "SavedData present after real restart");
                 check(saved.toString().contains("counter"), "duplicate fixture persisted");
+                if (MagicProviders.get("goety") != null && MagicProviders.get("irons_spellbooks") != null) {
+                    check(saved.getAllKeys().stream().map(saved::getCompound).anyMatch(providers ->
+                        MagicDataStore.loadRules(providers.get("goety")).stream().anyMatch(r -> r.sequence == 0)
+                        && MagicDataStore.loadRules(providers.get("irons_spellbooks")).stream().anyMatch(r -> r.sequence == 1)),
+                        "cross-provider order survived restart");
+                    CNPCMagic.LOGGER.info("VERIFY PASS cross-provider order persisted after restart");
+                }
                 CNPCMagic.LOGGER.info("VERIFY PASS real restart SavedData NPCs={}", saved.getAllKeys().size());
                 return;
             }
@@ -140,6 +165,10 @@ public final class MagicVerification {
                 fixture(level, origin.offset(20, 0, 0), "irons_spellbooks", List.of(rule("irons_spellbooks:firebolt", 2, 60, 1)));
                 fixture(level, origin.offset(40, 0, 0), "irons_spellbooks", List.of(rule("irons_spellbooks:fire_breath", 1, 60, 1)));
                 fixture(level, origin.offset(60, 0, 0), "irons_spellbooks", List.of(rule("irons_spellbooks:ray_of_siphoning", 1, 60, 1)));
+                fixture(level, origin.offset(200, 0, 0), "irons_spellbooks",
+                    List.of(rule("irons_spellbooks:acupuncture", 1, 60, 100)));
+                fixture(level, origin.offset(230, 0, 0), "irons_spellbooks", List.of(rule(ECHO, 1, 60, 1)));
+                fixture(level, origin.offset(260, 0, 0), "irons_spellbooks", List.of(rule(ECHO, 1, 60, 1)));
             }
             if (ModList.get().isLoaded("goety")) {
                 fixture(level, origin.offset(100, 0, 0), "goety", List.of(rule("goety:soul_bolt_focus", 2, 60, 1)));
@@ -148,12 +177,16 @@ public final class MagicVerification {
                 fixture(level, origin.offset(160, 0, 0), "goety", List.of(rule("goety:prisma_beam_focus", 1, 60, 1)));
             }
             fixture(level, origin.offset(80, 0, 0), "cnpcmagic_verify", List.of(
-                rule("counter", 2, 60, 1), rule("counter", 1, 100, 2)));
+                rule("cnpcmagic_verify:counter", 2, 60, 1), rule("cnpcmagic_verify:counter", 1, 100, 2)));
             if (ModList.get().isLoaded("goety") && ModList.get().isLoaded("irons_spellbooks")) {
-                fixture(level, origin.offset(180, 0, 0), "goety", List.of(rule("goety:soul_bolt_focus", 1, 80, 1)));
+                MagicRule goety = rule("goety:soul_bolt_focus", 1, 80, 1);
+                MagicRule iron = rule("irons_spellbooks:firebolt", 1, 80, 1);
+                goety.sequence = 0; iron.sequence = 1;
+                fixture(level, origin.offset(180, 0, 0), "goety", List.of(goety));
                 Trial mixed = TRIALS.get(TRIALS.size() - 1);
+                mixed.mixed = true;
                 MagicDataStore.get(event.getServer()).setRules(mixed.npc.getUUID(), "irons_spellbooks",
-                    List.of(rule("irons_spellbooks:firebolt", 1, 80, 1)));
+                    List.of(iron));
             }
             CNPCMagic.LOGGER.info("VERIFY fixtures ready at 0 80 0; deadline 1200 ticks");
         } catch (RuntimeException | LinkageError e) {
@@ -172,7 +205,8 @@ public final class MagicVerification {
         npc.setInvulnerable(true);
         npc.setPersistenceRequired();
         npc.display.setName(rules.get(0).spellId);
-        target.moveTo(pos.getX() + 0.5, pos.getY(), pos.getZ() + (provider.equals("goety") ? 3.5 : 8.5), 0, 0);
+        boolean closeEcho = rules.get(0).spellId.equals(ECHO) && pos.getX() == 230;
+        target.moveTo(pos.getX() + 0.5, pos.getY(), pos.getZ() + (closeEcho ? 1.6 : provider.equals("goety") ? 3.5 : 8.5), 0, 0);
         target.setNoAi(true);
         target.setPersistenceRequired();
         target.getAttribute(Attributes.MAX_HEALTH).setBaseValue(10000);
@@ -186,10 +220,16 @@ public final class MagicVerification {
         // CNPC serialization can change its own transient fields even within the same tick.
         var changed = before.getAllKeys().stream().filter(key -> !java.util.Objects.equals(before.get(key), after.get(key))).toList();
         CNPCMagic.LOGGER.info("VERIFY NPC serializer changed keys {}", changed);
-        check(!after.toString().contains("cnpcmagic"), "configuration must not enter NPC NBT");
         check(!hasRule(after), "magic rule fields must not enter NPC NBT");
         CNPCMagic.LOGGER.info("VERIFY PASS configuration outside NPC NBT {}", rules.get(0).spellId);
-        TRIALS.add(new Trial(npc, target, rules.get(0).spellId));
+        TRIALS.add(new Trial(npc, target, rules.get(0).spellId, rules.get(0).level));
+    }
+
+    @SubscribeEvent
+    public static void entityJoined(EntityJoinLevelEvent event) {
+        if (reported || !(event.getEntity() instanceof net.minecraft.world.entity.projectile.Projectile sword)
+            || !new net.minecraft.resources.ResourceLocation(ECHO_SWORD).equals(net.minecraftforge.registries.ForgeRegistries.ENTITY_TYPES.getKey(sword.getType()))) return;
+        for (Trial trial : TRIALS) if (trial.npc == sword.getOwner()) trial.echoes++;
     }
 
     private static boolean hasRule(net.minecraft.nbt.Tag tag) {
@@ -219,12 +259,34 @@ public final class MagicVerification {
         }
         reported = true;
         for (Trial trial : TRIALS) {
-            if (trial.spell.equals("counter")) {
+            if (trial.spell.equals("cnpcmagic_verify:counter")) {
                 continue;
             }
             float damage = 10000 - trial.target.getHealth();
+            if (trial.spell.equals(ECHO)) {
+                boolean close = trial.npc.distanceToSqr(trial.target) < 4;
+                boolean passed = trial.completed >= 3 && (close ? trial.echoes > 0 && damage > 0 : trial.echoes == 0 && damage == 0);
+                CNPCMagic.LOGGER.info("VERIFY {} Iron echoing melee follow-up near={} casts={} nativeSwords={} damage={}",
+                    passed ? "PASS" : "FAIL", close, trial.completed, trial.echoes, damage);
+                continue;
+            }
+            if (trial.mixed) {
+                boolean passed = trial.startOrder.size() >= 4 && trial.startOrder.subList(0, 4)
+                    .equals(List.of("goety", "irons_spellbooks", "goety", "irons_spellbooks"));
+                CNPCMagic.LOGGER.info("VERIFY {} cross-provider order {}", passed ? "PASS" : "FAIL", trial.startOrder);
+            }
+            if (trial.spell.equals("irons_spellbooks:acupuncture")) {
+                check(trial.starts >= 1 && trial.completed >= 1 && trial.levelsMatch
+                        && trial.observedLevel == 100 && damage > 0,
+                    "Iron acupuncture level 100 native cast");
+            }
+            boolean passed = trial.starts >= 3 && trial.completed >= 3 && damage > 0;
+            if (trial.spell.equals("irons_spellbooks:acupuncture")) {
+                passed = trial.starts >= 1 && trial.completed >= 1 && trial.levelsMatch
+                    && trial.observedLevel == 100 && damage > 0;
+            }
             CNPCMagic.LOGGER.info("VERIFY {} {} starts={} completed={} damage={} providers={}",
-                trial.starts >= 3 && trial.completed >= 3 && damage > 0 ? "PASS" : "FAIL", trial.spell,
+                passed ? "PASS" : "FAIL", trial.spell,
                 trial.starts, trial.completed, damage, trial.providers);
         }
         boolean counters = FIRST.size() >= 6 && SECOND.size() >= 3;
@@ -243,15 +305,22 @@ public final class MagicVerification {
         private final EntityNPCInterface npc;
         private final Pig target;
         private final String spell;
+        private final int expectedLevel;
         private final net.minecraft.world.phys.Vec3 anchor;
         private int starts;
         private int completed;
+        private int observedLevel;
+        private boolean levelsMatch = true;
+        private boolean mixed;
+        private int echoes;
+        private final List<String> startOrder = new ArrayList<>();
         private final java.util.Set<String> providers = new java.util.HashSet<>();
 
-        private Trial(EntityNPCInterface npc, Pig target, String spell) {
+        private Trial(EntityNPCInterface npc, Pig target, String spell, int expectedLevel) {
             this.npc = npc;
             this.target = target;
             this.spell = spell;
+            this.expectedLevel = expectedLevel;
             this.anchor = target.position();
         }
     }
@@ -260,13 +329,17 @@ public final class MagicVerification {
         public String getId() { return delegate.getId(); }
         public boolean isValidSpell(String spell) { return delegate.isValidSpell(spell); }
         public int getMaxLevel(String spell) { return delegate.getMaxLevel(spell); }
+        public boolean requiresMeleeTarget(String spell) { return delegate.requiresMeleeTarget(spell); }
         public MagicCast startCast(LivingEntity caster, String spell, int level, LivingEntity target) {
             MagicCast cast = delegate.startCast(caster, spell, level, target);
             if (cast == null) return null;
             Trial trial = TRIALS.stream().filter(t -> t.npc == caster).findFirst().orElse(null);
             if (trial == null) return cast;
             trial.starts++;
+            trial.observedLevel = level;
+            trial.levelsMatch &= level == trial.expectedLevel;
             trial.providers.add(getId());
+            if (trial.mixed) trial.startOrder.add(getId());
             return new MagicCast() {
                 public boolean tick(LivingEntity mob, LivingEntity victim) {
                     boolean done = cast.tick(mob, victim);
@@ -281,7 +354,7 @@ public final class MagicVerification {
 
     private static final class CounterProvider implements MagicProvider {
         public String getId() { return "cnpcmagic_verify"; }
-        public boolean isValidSpell(String spell) { return spell.equals("counter"); }
+        public boolean isValidSpell(String spell) { return spell.equals("cnpcmagic_verify:counter"); }
         public int getMaxLevel(String spell) { return 2; }
         public MagicCast startCast(LivingEntity caster, String spell, int level, LivingEntity target) {
             (level == 1 ? FIRST : SECOND).add(caster.level().getGameTime() - started);

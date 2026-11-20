@@ -14,7 +14,7 @@ import java.util.UUID;
 /**
  * CNPC strips UUID/UUIDMost/UUIDLeast when saving an NPC into a soulstone or clone,
  * so a placed copy cannot look up rules by the old entity UUID. Persist one short
- * reference instead; the rules stay in the world SavedData.
+ * reference instead; the rules stay in CNPCplus's external store.
  */
 @Mixin(value = EntityNPCInterface.class, remap = false)
 public abstract class MixinNpcDataReference implements MagicDataAccess {

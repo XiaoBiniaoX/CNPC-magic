@@ -4,7 +4,6 @@ import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.world.level.saveddata.SavedData;
 import noppes.npcs.entity.EntityNPCInterface;
 
 import java.util.HashMap;
@@ -13,15 +12,17 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
-public class MagicDataStore extends SavedData {
+public class MagicDataStore extends CnpcPlusData {
     private static final String DATA_NAME = "cnpcmagic_npc_data";
 
     private final Map<UUID, Map<String, List<MagicRule>>> data = new HashMap<>();
 
     public MagicDataStore() {
+        super("magic_rules");
     }
 
     public MagicDataStore(CompoundTag tag) {
+        this();
         CompoundTag npcs = tag.getCompound("npcs");
         for (String uuidString : npcs.getAllKeys()) {
             UUID uuid;
@@ -42,9 +43,7 @@ public class MagicDataStore extends SavedData {
     }
 
     public static MagicDataStore get(MinecraftServer server) {
-        return server.overworld().getDataStorage().computeIfAbsent(
-            MagicDataStore::new, MagicDataStore::new, DATA_NAME
-        );
+        return CnpcPlusData.get(server, DATA_NAME, "magic_rules", MagicDataStore::new, MagicDataStore::new);
     }
 
     public List<MagicRule> getRules(UUID npc, String providerId) {
@@ -90,14 +89,15 @@ public class MagicDataStore extends SavedData {
             }
         }
         if (merged.equals(existing)) {
+            if (isDirty()) flush();
             return;
         }
         UUID id = UUID.randomUUID();
-        if (!merged.isEmpty()) {
-            data.put(id, merged);
-        }
-        access.cnpcmagic$setDataId(id);
+        data.put(id, merged);
         setDirty(true);
+        try { flush(); }
+        catch (IllegalStateException error) { data.remove(id); throw error; }
+        access.cnpcmagic$setDataId(id);
     }
 
     private static Map<String, List<MagicRule>> normalize(Map<String, List<MagicRule>> providers) {

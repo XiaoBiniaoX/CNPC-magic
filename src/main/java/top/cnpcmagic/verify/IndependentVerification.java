@@ -71,11 +71,11 @@ public final class IndependentVerification {
             ServerLevel world = event.getServer().overworld();
             start = world.getGameTime();
             MagicProviders.register(new TestProvider());
-            cancellable = rule("parallel_test", 4, true, 50);
-            failedRule = rule("parallel_test", 5, true, 200);
+            cancellable = rule("cnpcmagic_parallel_verify:parallel_test", 4, true, 50);
+            failedRule = rule("cnpcmagic_parallel_verify:parallel_test", 5, true, 200);
             create(world, 320, "cnpcmagic_parallel_verify", List.of(
-                rule("parallel_test", 1, false, 60), rule("parallel_test", 2, false, 80),
-                rule("parallel_test", 3, true, 20), cancellable, failedRule));
+                rule("cnpcmagic_parallel_verify:parallel_test", 1, false, 60), rule("cnpcmagic_parallel_verify:parallel_test", 2, false, 80),
+                rule("cnpcmagic_parallel_verify:parallel_test", 3, true, 20), cancellable, failedRule));
             animationOwnership(PROBES.get(0).npc);
             int x = 360;
             for (String id : List.of("irons_spellbooks", "goety")) {
@@ -89,7 +89,7 @@ public final class IndependentVerification {
             }
             if (MagicProviders.get("irons_spellbooks") != null) ironDataIsolation(PROBES.get(0).npc);
             if (MagicProviders.get("irons_spellbooks") != null || MagicProviders.get("goety") != null) {
-                int view = MagicProviders.get("goety") != null ? (MagicProviders.get("irons_spellbooks") != null ? 180 : 100) : 0;
+                int view = MagicProviders.get("irons_spellbooks") != null ? 40 : 140;
                 guiNpc = CustomEntities.entityCustomNpc.create(world);
                 guiNpc.moveTo(view + 3.5, 80, -1.5, 0, 0);
                 guiNpc.setNoAi(true);
@@ -206,14 +206,8 @@ public final class IndependentVerification {
         if (elapsed == 40) cancellable.enabled = true;
         Stats failedStats = PROBES.get(0).stats.get("5");
         if (failedStats != null && !failedStats.starts.isEmpty()) {
-            long first = failedStats.starts.get(0);
-            // Cancel before its three-tick natural end, regardless of setup/first-entity-tick timing.
-            if (elapsed == first + 1) failedRule.enabled = false;
-            if (elapsed == first + 2) failedRule.enabled = true;
-        }
-        if (viewer != null && !viewer.isRemoved()) {
-            NoppesUtilServer.setEditingNpc(viewer, guiNpc);
-            if (elapsed >= 700) guiNpc.setPos(viewer.getX() - 3, 80, -1.5);
+            // Re-enable after the watcher observes cancellation so the real 20-tick backoff is measured.
+            failedRule.enabled = failedStats.cancelled > 0;
         }
         if (elapsed < 1100) return;
         reported = true;
@@ -241,16 +235,23 @@ public final class IndependentVerification {
                 CNPCMagic.LOGGER.info("VERIFY PASS independent native {} maxActive={} damage={}",
                     probe.provider, probe.maxActive, 10000 - probe.target.getHealth());
             }
-            if (guiNpc != null) {
-                for (String id : List.of("irons_spellbooks", "goety")) {
-                    if (MagicProviders.get(id) == null) continue;
-                    List<MagicRule> rules = MagicDataStore.get(viewer.server).getRules(guiNpc.getUUID(), id);
-                    check(rules.size() == 2 && rules.get(0).independent && !rules.get(1).independent, "GUI packet preserved per-entry flags " + id);
-                }
-                CNPCMagic.LOGGER.info("VERIFY PASS independent GUI server save per-entry flags");
-            }
         } catch (RuntimeException | LinkageError e) {
             CNPCMagic.LOGGER.error("VERIFY FAIL independent checks", e);
+        }
+    }
+
+    @SubscribeEvent
+    public static void logout(PlayerEvent.PlayerLoggedOutEvent event) {
+        if (event.getEntity() != viewer) return;
+        try {
+            for (String id : List.of("irons_spellbooks", "goety")) {
+                if (MagicProviders.get(id) == null) continue;
+                List<MagicRule> rules = MagicDataStore.get(viewer.server).getRules(guiNpc, id);
+                check(rules.size() == 2 && rules.get(0).independent && !rules.get(1).independent, "GUI packet preserved per-entry flags " + id);
+            }
+            CNPCMagic.LOGGER.info("VERIFY PASS independent GUI server save per-entry flags");
+        } catch (RuntimeException e) {
+            CNPCMagic.LOGGER.error("VERIFY FAIL independent GUI server save", e);
         }
     }
 
@@ -329,6 +330,7 @@ public final class IndependentVerification {
         public String getId() { return delegate.getId(); }
         public boolean isValidSpell(String spell) { return delegate.isValidSpell(spell); }
         public int getMaxLevel(String spell) { return delegate.getMaxLevel(spell); }
+        public boolean requiresMeleeTarget(String spell) { return delegate.requiresMeleeTarget(spell); }
         public MagicCast startCast(LivingEntity caster, String spell, int level, LivingEntity target) {
             return watch(caster, spell, delegate.startCast(caster, spell, level, target));
         }
@@ -336,7 +338,7 @@ public final class IndependentVerification {
 
     private static final class TestProvider implements MagicProvider {
         public String getId() { return "cnpcmagic_parallel_verify"; }
-        public boolean isValidSpell(String spell) { return spell.equals("parallel_test"); }
+        public boolean isValidSpell(String spell) { return spell.equals("cnpcmagic_parallel_verify:parallel_test"); }
         public int getMaxLevel(String spell) { return 5; }
         public MagicCast startCast(LivingEntity caster, String spell, int level, LivingEntity target) {
             return watch(caster, String.valueOf(level), new MagicCast() {

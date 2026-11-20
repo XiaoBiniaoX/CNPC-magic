@@ -22,4 +22,9 @@ public final class MagicProviders {
     public static MagicProvider get(String id) {
         return PROVIDERS.get(id);
     }
+
+    public static MagicProvider forSpell(String spell) {
+        int colon = spell == null ? -1 : spell.indexOf(':');
+        return colon < 0 ? null : get(spell.substring(0, colon));
+    }
 }

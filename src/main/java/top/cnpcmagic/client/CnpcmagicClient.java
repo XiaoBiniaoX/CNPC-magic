@@ -17,6 +17,10 @@ public final class CnpcmagicClient {
     private CnpcmagicClient() {
     }
 
+    @SubscribeEvent public static void renderers(net.minecraftforge.client.event.EntityRenderersEvent.RegisterRenderers event) {
+        top.cnpcmagic.client.gui.MagicEditor.registerBoltRenderer(event);
+    }
+
     @SubscribeEvent
     public static void onClientSetup(FMLClientSetupEvent event) {
         event.enqueueWork(() -> {

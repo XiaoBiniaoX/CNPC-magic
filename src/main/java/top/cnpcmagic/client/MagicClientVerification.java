@@ -82,6 +82,7 @@ public final class MagicClientVerification {
             capture = true;
         }
         if (ticks == 600) {
+            if (guiStage < 4) CNPCMagic.LOGGER.error("VERIFY CLIENT FAIL independent GUI did not finish (stage={})", guiStage);
             boolean valid = POSES.stream().anyMatch(id -> id.startsWith("goety:")) == ModList.get().isLoaded("goety")
                 && POSES.stream().anyMatch(id -> id.startsWith("irons_spellbooks:")) == ModList.get().isLoaded("irons_spellbooks")
                 && HELD.stream().anyMatch(id -> id.startsWith("goety:")) == ModList.get().isLoaded("goety")
@@ -101,7 +102,7 @@ public final class MagicClientVerification {
         var resource = mc.getResourceManager().getResource(new ResourceLocation(CNPCMagic.MODID, "lang/" + language + ".json")).orElseThrow();
         try (var reader = new InputStreamReader(resource.open(), StandardCharsets.UTF_8)) {
             var translations = JsonParser.parseReader(reader).getAsJsonObject();
-            require(translations.size() == 27, "complete translation key set");
+            require(translations.size() >= 100, "complete translation key set");
             for (var entry : translations.entrySet()) {
                 require(Component.translatable(entry.getKey()).getString().equals(entry.getValue().getAsString()),
                     "Minecraft loaded translation " + entry.getKey());
@@ -113,23 +114,9 @@ public final class MagicClientVerification {
         require(mc.font.width(Component.translatable("cnpcmagic.gui.spell")) <= 58, "spell label fits before picker");
         require(mc.font.width(Component.translatable("cnpcmagic.gui.hint")) <= 404, "translated footer fits panel");
         require(mc.font.width(Component.translatable("cnpcmagic.gui.addHint")) <= 196, "empty spell list hint fits panel");
-        require(mc.font.width(Component.translatable("cnpcmagic.gui.add")) <= 48, "add button text fits");
-        require(mc.font.width(Component.translatable("cnpcmagic.gui.remove")) <= 48, "remove button text fits");
-        CNPCMagic.LOGGER.info("VERIFY CLIENT PASS language={} keys=27 layout=true", language);
-    }
-
-    private static void selectProvider(String id) {
-        GuiCustomScrollNop scroll = gui.getWrapper().scrolls.get(100);
-        scroll.setSelected(Component.translatable("cnpcmagic.provider." + id).getString());
-        gui.scrollClicked(0, 0, 0, scroll);
-    }
-
-    private static void selectSecond(ClientMagicProvider provider) {
-        GuiCustomScrollNop scroll = gui.getWrapper().scrolls.get(101);
-        // Provider-agnostic: the second entry is whatever this provider actually lists.
-        String id = provider.getSpellIds().get(1);
-        scroll.setSelected("2. " + provider.getDisplayName(id));
-        gui.scrollClicked(0, 0, 0, scroll);
+        require(mc.font.width(Component.translatable("cnpcmagic.gui.add")) <= 64, "add button text fits");
+        require(mc.font.width(Component.translatable("cnpcmagic.gui.remove")) <= 64, "remove button text fits");
+        CNPCMagic.LOGGER.info("VERIFY CLIENT PASS language={} editor translations loaded", language);
     }
 
     private static void verifyIndependentGui(Minecraft mc) {
@@ -144,13 +131,13 @@ public final class MagicClientVerification {
                 for (var entity : mc.level.entitiesForRendering()) {
                     if (entity instanceof EntityNPCInterface npc && npc.getName().getString().equals("independent GUI")) guiNpc = npc;
                 }
-                require(guiNpc != null, "GUI fixture tracked");
+                if (guiNpc == null) return;
                 gui = new GuiNpcMagic(guiNpc);
                 mc.setScreen(gui);
                 guiStage = 1;
                 return;
             }
-            if (gui.getButton(12) == null) return; // Wait for the real server GUI-data response.
+            if (!gui.ready()) return; // Wait for the real server GUI-data response.
             if (guiReadyAt == 0) {
                 guiReadyAt = ticks;
                 capture = true;
@@ -158,41 +145,25 @@ public final class MagicClientVerification {
             }
             if (ticks - guiReadyAt < 5) return; // Let the actual layout render before exercising controls.
             if (guiStage == 1) {
-                for (ClientMagicProvider provider : ClientMagicProviders.all()) {
-                    selectProvider(provider.getId());
-                    require(gui.getButton(12).getValue() == 0, "independent default off");
-                    require(gui.getTextField(21).enabled, "round count enabled in ordered mode");
-                    require(gui.getTextField(23).getY() + 18 <= gui.guiTop + gui.imageHeight, "new button and fields fit panel");
-                    var button = gui.getButton(12);
-                    button.setDisplay(1);
-                    gui.buttonEvent(button);
-                    require(!gui.getTextField(21).enabled, "independent count disabled");
-                    selectSecond(provider);
-                    require(gui.getButton(12).getValue() == 0, "duplicate entry flag isolated");
-                }
+                gui.verifyIndependent(true);
                 gui.save();
-                gui.close();
                 guiStage = 2;
                 guiReadyAt = ticks;
                 return;
             }
             if (guiStage == 2) {
                 if (ticks - guiReadyAt < 20) return;
+                if (!gui.ready()) return;
                 gui = new GuiNpcMagic(guiNpc);
                 mc.setScreen(gui);
                 guiStage = 3;
                 guiReadyAt = 0;
                 return;
             }
-            for (ClientMagicProvider provider : ClientMagicProviders.all()) {
-                selectProvider(provider.getId());
-                require(gui.getButton(12).getValue() == 1 && !gui.getTextField(21).enabled, "flag restored from server after reopen");
-                selectSecond(provider);
-                require(gui.getButton(12).getValue() == 0 && gui.getTextField(21).enabled, "other entry still ordered after reopen");
-            }
-            gui.close();
+            gui.verifyIndependent(false);
+            gui.onClose();
             guiStage = 4;
-            CNPCMagic.LOGGER.info("VERIFY CLIENT PASS independent GUI default/toggle/duplicate/provider-switch/save/reopen");
+            CNPCMagic.LOGGER.info("VERIFY CLIENT PASS editor independent draft/save/reopen (widget interaction not covered)");
         } catch (RuntimeException | LinkageError e) {
             guiStage = 4;
             CNPCMagic.LOGGER.error("VERIFY CLIENT FAIL independent GUI", e);

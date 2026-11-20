@@ -15,6 +15,7 @@ import top.cnpcmagic.CNPCMagic;
 import top.cnpcmagic.provider.MagicCast;
 import top.cnpcmagic.provider.MagicProvider;
 import top.cnpcmagic.provider.MagicProviders;
+import top.cnpcmagic.casting.*;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -33,29 +34,57 @@ public final class ScriptMagic {
 
     /** Returns true when accepted, not when the asynchronous charge/channel has finished. */
     public static boolean cast(Object casterObject, String spellId, int level, Object targetObject) {
+        return castResult(casterObject, spellId, level, targetObject).isSuccess();
+    }
+
+    public static SpellResult castResult(Object casterObject, String spellId, int level, Object targetObject) {
         LivingEntity caster = entity(casterObject);
-        LivingEntity target = entity(targetObject);
-        ResourceLocation id = spellId == null ? null : ResourceLocation.tryParse(spellId);
-        if (stopping || caster == null || target == null || id == null || !valid(caster, target)
-            || !caster.getServer().isSameThread() || ACTIVE.containsKey(caster)) return false;
-        MagicProvider provider = MagicProviders.get(id.getNamespace());
-        if (provider == null || !provider.isValidSpell(spellId) || level < 1 || level > provider.getMaxLevel(spellId)) return false;
+        LivingEntity livingTarget = entity(targetObject);
+        SpellTarget descriptor = targetObject instanceof SpellTarget t ? t
+            : livingTarget == null ? null : SpellTarget.entity(livingTarget);
+        if (stopping || caster == null || caster.getServer() == null || !caster.getServer().isSameThread())
+            return SpellResult.fail("INVALID_CASTER", "A server-side living caster is required");
+        if (ACTIVE.containsKey(caster)) return SpellResult.fail("BUSY", "Caster already has a script cast");
+        if (descriptor == null) return SpellResult.fail("INVALID_TARGET", "Use a living target or an explicit target descriptor");
+        LivingEntity target = descriptor.entity();
         if (caster instanceof EntityNPCInterface npc) MagicCombatHandler.reset(npc);
         LivingEntity previous = caster instanceof Mob mob ? mob.getTarget() : null;
         if (caster instanceof Mob mob) mob.setTarget(target);
-        MagicCombatHandler.face(caster, target);
-        try {
-            MagicCast cast = withTarget(caster, target, () -> provider.startCast(caster, spellId, level, target));
-            if (cast != null) {
-                ACTIVE.put(caster, new Session(cast, target, previous));
-                return true;
-            }
-        } catch (RuntimeException | LinkageError e) {
-            CNPCMagic.LOGGER.error("Script cast failed to start {}", spellId, e);
+        if (target != null && target != caster) MagicCombatHandler.face(caster, target);
+        CastingService.Attempt attempt = CastingService.start(caster, spellId, level, descriptor,
+            caster instanceof net.minecraft.world.entity.player.Player ? "player_script" : "entity_script");
+        if (attempt.cast() != null) {
+            ACTIVE.put(caster, new Session(attempt.cast(), target, previous));
+            return attempt.result();
         }
         if (caster instanceof Mob mob) mob.setTarget(previous);
-        return false;
+        return attempt.result();
     }
+
+    public static SpellResult castAt(Object caster, String id, int level, double x, double y, double z) {
+        return castResult(caster, id, level, SpellTarget.position(x, y, z));
+    }
+    public static SpellResult castDirection(Object caster, String id, int level, double x, double y, double z) {
+        return castResult(caster, id, level, SpellTarget.direction(x, y, z));
+    }
+    public static SpellResult castSelf(Object casterObject, String id, int level) {
+        LivingEntity caster = entity(casterObject);
+        return caster == null ? SpellResult.fail("INVALID_CASTER", "Living caster required") : castResult(caster, id, level, SpellTarget.self(caster));
+    }
+    public static String[] query(Object casterObject, String filter) {
+        LivingEntity caster = entity(casterObject);
+        if (caster == null || caster.getServer() == null) return new String[0];
+        String text = filter == null ? "" : filter.toLowerCase(java.util.Locale.ROOT);
+        return SpellLibrary.get(caster.getServer()).spells.values().stream()
+            .filter(d -> (d.id + " " + d.name + " " + d.school + " " + d.tags).toLowerCase(java.util.Locale.ROOT).contains(text)).map(d -> d.id).toArray(String[]::new);
+    }
+    public static String info(Object casterObject, String id) {
+        LivingEntity caster = entity(casterObject);
+        if (caster == null || caster.getServer() == null) return "{}";
+        SpellDefinition d = SpellLibrary.get(caster.getServer()).spells.get(id);
+        return d == null ? "{}" : d.save().toString();
+    }
+    public static int cooldown(Object casterObject, String id) { LivingEntity c = entity(casterObject); return c == null ? 0 : CastingService.cooldown(c, id); }
 
     public static boolean isCasting(Object caster) {
         return ACTIVE.containsKey(entity(caster));
@@ -87,7 +116,7 @@ public final class ScriptMagic {
         return caster == invokingCaster ? invokingTarget : null;
     }
 
-    private static <T> T withTarget(LivingEntity caster, LivingEntity target, Supplier<T> action) {
+    public static <T> T withTarget(LivingEntity caster, LivingEntity target, Supplier<T> action) {
         LivingEntity previousCaster = invokingCaster;
         LivingEntity previousTarget = invokingTarget;
         invokingCaster = caster;
@@ -102,7 +131,7 @@ public final class ScriptMagic {
 
     private static boolean valid(LivingEntity caster, LivingEntity target) {
         return !caster.level().isClientSide() && caster.getServer() != null && caster.isAlive() && !caster.isRemoved()
-            && target.isAlive() && !target.isRemoved() && target.level() == caster.level();
+            && (target == null || target.isAlive() && !target.isRemoved() && target.level() == caster.level());
     }
 
     private static void restoreTarget(LivingEntity caster, Session session) {
@@ -120,7 +149,7 @@ public final class ScriptMagic {
                 continue;
             }
             if (caster instanceof Mob mob) mob.setTarget(session.target);
-            MagicCombatHandler.face(caster, session.target);
+            if (session.target != null && session.target != caster) MagicCombatHandler.face(caster, session.target);
             try {
                 if (withTarget(caster, session.target, () -> session.cast.tick(caster, session.target))) {
                     ACTIVE.remove(caster);

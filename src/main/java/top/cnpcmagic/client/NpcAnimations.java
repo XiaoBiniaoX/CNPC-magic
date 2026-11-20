@@ -92,6 +92,7 @@ public final class NpcAnimations {
             player.leftPants.copyFrom(player.leftLeg);
         }
         MagicClientVerification.applied(npc, state.animation, model);
+        top.cnpcmagic.client.gui.EditorClientVerification.applied(npc, model);
     }
 
     private static void transform(KeyframeAnimationPlayer animation, String name, ModelPart part, float partialTick) {

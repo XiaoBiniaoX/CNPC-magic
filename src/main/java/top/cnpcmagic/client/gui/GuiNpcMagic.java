@@ -1,316 +1,180 @@
 package top.cnpcmagic.client.gui;
 
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.network.chat.Component;
-import net.minecraft.util.Mth;
-import noppes.npcs.client.gui.util.GuiNPCInterface2;
+import noppes.npcs.client.gui.mainmenu.GuiNpcDisplay;
 import noppes.npcs.entity.EntityNPCInterface;
-import noppes.npcs.shared.client.gui.components.GuiButtonNop;
-import noppes.npcs.shared.client.gui.components.GuiCustomScrollNop;
-import noppes.npcs.shared.client.gui.components.GuiLabel;
-import noppes.npcs.shared.client.gui.components.GuiTextFieldNop;
-import noppes.npcs.shared.client.gui.listeners.ICustomScrollListener;
 import noppes.npcs.shared.client.gui.listeners.IGuiData;
-import noppes.npcs.shared.client.gui.listeners.ITextfieldListener;
-import top.cnpcmagic.client.provider.ClientMagicProvider;
-import top.cnpcmagic.client.provider.ClientMagicProviders;
-import top.cnpcmagic.data.MagicRule;
-import top.cnpcmagic.data.MagicDataStore;
-import top.cnpcmagic.network.C2SMagicRequest;
-import top.cnpcmagic.network.C2SMagicSave;
-import top.cnpcmagic.network.NetworkHandler;
+import top.cnpcmagic.casting.SpellDefinition;
+import top.cnpcmagic.client.provider.*;
+import top.cnpcmagic.data.*;
+import top.cnpcmagic.network.*;
+import java.util.*;
 
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-
-public class GuiNpcMagic extends GuiNPCInterface2 implements IGuiData, ITextfieldListener, ICustomScrollListener {
-    private final Map<String, List<MagicRule>> rules = new LinkedHashMap<>();
-    private String selectedProvider = "";
-    private int selectedRule = 0;
-    private boolean syncRequested = false;
-    private boolean synced = false;
-
-    public GuiNpcMagic(EntityNPCInterface npc) {
-        super(npc, 7);
-    }
-
-    @Override
-    public void init() {
+/** Standalone Gun-style editor with explicit draft/save acknowledgement. */
+public class GuiNpcMagic extends EditorScreen implements IGuiData {
+    final EntityNPCInterface npc;
+    final Map<String, List<MagicRule>> rules = new LinkedHashMap<>();
+    final Map<String, SpellDefinition> library = new LinkedHashMap<>();
+    private CompoundTag baseline = new CompoundTag();
+    private CompoundTag pendingSave;
+    RuleEditor detail;
+    SpellPicker picker;
+    private Rows ruleRows;
+    String provider = "cnpcmagic";
+    int selected;
+    boolean synced, saving, leaveAfterSave;
+    private boolean requested;
+    public GuiNpcMagic(EntityNPCInterface npc) { super(null, "title"); this.npc = npc; MagicEditor.editor = this; }
+    @Override public void init() {
+        if (picker != null) { picker.controls(); return; }
         super.init();
-        List<ClientMagicProvider> providers = new ArrayList<>(ClientMagicProviders.all());
-        for (ClientMagicProvider provider : providers) {
-            rules.computeIfAbsent(provider.getId(), k -> new ArrayList<>());
+        int orderWidth = Math.max(82, font.width(text("sequence")) + 10);
+        button(width - 108 - orderWidth, 7, orderWidth, "sequence", () -> { if (flushDetail()) minecraft.setScreen(new SequenceScreen(this)); }).active = synced && !saving;
+        button(width - 100, 7, 92, "save", this::save).active = synced && !saving;
+        if (saving) { label(18, 48, "saving"); return; }
+        int side = Math.min(180, Math.max(104, width / 4));
+        int strip = width - 24;
+        List<String> providers = providerIds();
+        for (int i = 0; i < providers.size(); i++) {
+            String id = providers.get(i); rules.computeIfAbsent(id, k -> new ArrayList<>());
+            Component caption = Component.translatable("cnpcmagic.provider." + id);
+            int left = strip * i / providers.size(), right = strip * (i + 1) / providers.size();
+            var b = (EditorButton)buttonText(12 + left, 40, right - left, caption, () -> {
+                if (provider.equals(id) || !flushDetail()) return;
+                detail = null; ruleRows = null; provider = id; selected = 0; rebuild();
+            });
+            b.selected = provider.equals(id); b.setTooltip(Tooltip.create(caption));
         }
-        if (selectedProvider.isEmpty() && !providers.isEmpty()) {
-            selectedProvider = providers.get(0).getId();
-        }
-
-        addLabel(new GuiLabel(0, "cnpcmagic.gui.providers", guiLeft + 8, guiTop + 10));
-        GuiCustomScrollNop scroll = new GuiCustomScrollNop(this, 100);
-        scroll.setSize(84, 158);
-        scroll.guiLeft = guiLeft + 8;
-        scroll.guiTop = guiTop + 24;
-        addScroll(scroll);
-        List<String> names = new ArrayList<>();
-        for (ClientMagicProvider provider : providers) {
-            names.add(providerName(provider.getId()));
-        }
-        scroll.setList(names);
-        scroll.setSelected(providerName(selectedProvider));
-
+        int x = side + 18, w = width - x - 14, bottom = height - 32;
         if (synced) {
-            drawProviderPanel();
-        } else {
-            addLabel(new GuiLabel(1, "cnpcmagic.gui.loading", guiLeft + 100, guiTop + 24));
-        }
-
-        if (!syncRequested) {
-            syncRequested = true;
-            NetworkHandler.CHANNEL.sendToServer(new C2SMagicRequest());
-        }
-    }
-
-    private void drawProviderPanel() {
-        ClientMagicProvider provider = ClientMagicProviders.get(selectedProvider);
-        if (provider == null) {
-            addLabel(new GuiLabel(1, "cnpcmagic.gui.noProvider", guiLeft + 130, guiTop + 24));
-            return;
-        }
-        List<MagicRule> entries = rules.get(selectedProvider);
-        GuiCustomScrollNop spellScroll = new GuiCustomScrollNop(this, 101);
-        spellScroll.setSize(108, 134);
-        spellScroll.guiLeft = guiLeft + 98;
-        spellScroll.guiTop = guiTop + 24;
-        addScroll(spellScroll);
-        List<String> names = new ArrayList<>();
-        for (int i = 0; i < entries.size(); i++) {
-            names.add((i + 1) + ". " + spellName(provider, entries.get(i)));
-        }
-        spellScroll.setList(names);
-        selectedRule = Mth.clamp(selectedRule, 0, Math.max(0, entries.size() - 1));
-        if (!names.isEmpty()) {
-            spellScroll.setSelected(names.get(selectedRule));
-        }
-        addButton(new GuiButtonNop(this, 13, guiLeft + 98, guiTop + 162, 52, 18, "cnpcmagic.gui.add"));
-        addButton(new GuiButtonNop(this, 14, guiLeft + 154, guiTop + 162, 52, 18, "cnpcmagic.gui.remove"));
-        MagicRule rule = currentRule();
-        if (rule == null) {
-            addLabel(new GuiLabel(1, "cnpcmagic.gui.addHint", guiLeft + 214, guiTop + 30));
-            return;
-        }
-        int x = guiLeft + 214;
-        int y = guiTop + 20;
-
-        addLabel(new GuiLabel(1, "cnpcmagic.gui.enabled", x, y + 5));
-        addButton(new GuiButtonNop(this, 10, x + 102, y, 64, 18,
-            new String[]{"cnpcmagic.gui.off", "cnpcmagic.gui.on"}, rule.enabled ? 1 : 0));
-
-        y += 22;
-        addLabel(new GuiLabel(8, "cnpcmagic.gui.independent", x, y + 5));
-        addButton(new GuiButtonNop(this, 12, x + 102, y, 64, 18,
-            new String[]{"cnpcmagic.gui.off", "cnpcmagic.gui.on"}, rule.independent ? 1 : 0));
-
-        y += 22;
-        addLabel(new GuiLabel(2, "cnpcmagic.gui.spell", x, y + 5));
-        GuiButtonNop spellButton = new GuiButtonNop(this, 11, x + 62, y, 134, 18, "");
-        spellButton.setMessage(Component.literal(spellName(provider, rule)));
-        addButton(spellButton);
-
-        y += 22;
-        addLabel(new GuiLabel(3, selectedProvider.equals("goety") ? "cnpcmagic.gui.goetyLevel" : "cnpcmagic.gui.level", x, y + 5));
-        addTextField(numberField(20, x + 102, y, rule.level, 1, Math.max(1, provider.getMaxLevel(rule.spellId)), 1));
-
-        y += 22;
-        addLabel(new GuiLabel(4, rule.independent ? "cnpcmagic.gui.castsUnused" : "cnpcmagic.gui.casts", x, y + 5));
-        GuiTextFieldNop countField = numberField(21, x + 102, y, rule.casts, 1, 100, 3);
-        countField.enabled = !rule.independent;
-        addTextField(countField);
-
-        y += 22;
-        addLabel(new GuiLabel(5, "cnpcmagic.gui.cooldown", x, y + 5));
-        addTextField(numberField(22, x + 102, y, rule.cooldownTicks / 20, 0, 3600, 10));
-
-        y += 22;
-        addLabel(new GuiLabel(6, "cnpcmagic.gui.range", x, y + 5));
-        addTextField(numberField(23, x + 102, y, rule.range, 1, 64, 6));
-
-        addLabel(new GuiLabel(7, "cnpcmagic.gui.hint", guiLeft + 8, guiTop + 186, 0x777777));
-    }
-
-    private MagicRule currentRule() {
-        List<MagicRule> entries = rules.get(selectedProvider);
-        return entries == null || selectedRule < 0 || selectedRule >= entries.size() ? null : entries.get(selectedRule);
-    }
-
-    private GuiTextFieldNop numberField(int id, int x, int y, int value, int min, int max, int def) {
-        GuiTextFieldNop field = new GuiTextFieldNop(id, this, x, y, 52, 18, String.valueOf(value));
-        field.numbersOnly = true;
-        field.setMinMaxDefault(min, max, def);
-        return field;
-    }
-
-    private String providerName(String id) {
-        return Component.translatable("cnpcmagic.provider." + id).getString();
-    }
-
-    private String spellName(ClientMagicProvider provider, MagicRule rule) {
-        if (rule.spellId == null || rule.spellId.isEmpty()) {
-            return Component.translatable("cnpcmagic.gui.none").getString();
-        }
-        return provider.getDisplayName(rule.spellId);
-    }
-
-    @Override
-    public void buttonEvent(GuiButtonNop button) {
-        if (!synced) {
-            return;
-        }
-        applyFields();
-        MagicRule rule = currentRule();
-        switch (button.id) {
-            case 10 -> {
-                if (rule != null) {
-                    rule.enabled = button.getValue() == 1;
-                }
+            List<MagicRule> entries = rules.getOrDefault(provider, List.of());
+            List<String> names = new ArrayList<>();
+            for (int i = 0; i < entries.size(); i++) {
+                MagicRule r = entries.get(i); names.add((i + 1) + ". " + name(r.spellId) + " · " + text(r.enabled ? "cnpcmagic.gui.on" : "cnpcmagic.gui.off"));
             }
-            case 11 -> openSpellPicker(rule);
-            case 12 -> {
-                if (rule != null) {
-                    rule.independent = button.getValue() == 1;
-                    init();
-                }
+            selected = Math.min(selected, Math.max(0, entries.size() - 1));
+            int offset = ruleRows == null ? 0 : ruleRows.offset;
+            ruleRows = addRenderableWidget(new Rows(12, 66, side, bottom - 66 - (provider.equals("cnpcmagic") ? 47 : 23), names, selected, i -> {
+                if (i == selected) return;
+                if (!flushDetail()) { ruleRows.selected = selected; return; }
+                detail = null; selected = i; rebuild();
+            }));
+            ruleRows.offset = Math.max(selected - ruleRows.capacity() + 1, Math.min(offset, selected));
+            if (!entries.isEmpty()) {
+                if (detail == null || detail.rule != entries.get(selected)) detail = new RuleEditor(this, entries.get(selected));
+                detail.controls(x, 66, w, bottom);
+            } else label(x, 74, "noRules");
+            boolean builtin = provider.equals("cnpcmagic");
+            button(12, bottom - (builtin ? 44 : 20), side, "addSpell", () -> { if (flushDetail()) openPicker(null); });
+            if (builtin) {
+                int half = (side - 2) / 2;
+                button(12, bottom - 20, half, "newSpell", () -> { if (flushDetail()) minecraft.setScreen(new DefinitionEditor(this, null)); });
+                button(14 + half, bottom - 20, side - half - 2, "library", () -> { if (flushDetail()) minecraft.setScreen(new LibraryScreen(this)); });
             }
-            case 13 -> {
-                List<MagicRule> entries = rules.get(selectedProvider);
-                if (entries != null) {
-                    entries.add(new MagicRule());
-                    selectedRule = entries.size() - 1;
-                    init();
-                    openSpellPicker(currentRule());
-                }
-            }
-            case 14 -> {
-                if (rule != null) {
-                    rules.get(selectedProvider).remove(selectedRule);
-                    selectedRule = Math.max(0, selectedRule - 1);
-                    init();
-                }
-            }
-            default -> {
-            }
+        } else label(x, 68, "cnpcmagic.gui.loading");
+        if (!requested) { requested = true; NetworkHandler.CHANNEL.sendToServer(new C2SMagicRequest()); }
+    }
+    List<String> providerIds() {
+        List<String> ids = new ArrayList<>(); ids.add("cnpcmagic");
+        for (ClientMagicProvider p : ClientMagicProviders.all()) ids.add(p.getId());
+        return ids;
+    }
+    String name(String id) {
+        SpellDefinition definition = library.get(id);
+        if (definition != null) {
+            String path = id.substring(id.indexOf(':') + 1);
+            String key = "cnpcmagic.spell." + path;
+            return definition.name.equals(path.replace('_', ' ')) && net.minecraft.locale.Language.getInstance().has(key)
+                ? Component.translatable(key).getString() : definition.name;
+        }
+        int colon = id.indexOf(':'); ClientMagicProvider p = colon < 0 ? null : ClientMagicProviders.get(id.substring(0, colon));
+        return p == null ? id.isEmpty() ? text("cnpcmagic.gui.none") : id : p.getDisplayName(id);
+    }
+    int maxLevel(String id) { int colon = id.indexOf(':'); var p = colon < 0 ? null : ClientMagicProviders.get(id.substring(0, colon)); return id.startsWith("cnpcmagic:") ? 10 : p == null ? Integer.MAX_VALUE : Math.max(1, p.getMaxLevel(id)); }
+    void openPicker(RuleEditor edit) {
+        picker = new SpellPicker(this, edit); rebuild();
+        if (edit != null && !edit.rule.spellId.isEmpty()) picker.preview();
+    }
+    void insert(MagicRule rule) {
+        var entries = rules.get(provider);
+        rule.sequence = -1;
+        entries.add(rule); selected = entries.size() - 1; detail = null; rebuild();
+    }
+    void deleteSelected() {
+        var entries = rules.get(provider);
+        entries.remove(selected); detail = null; status = ""; rebuild();
+    }
+    @Override public boolean mouseScrolled(double x, double y, double delta) {
+        if (picker != null && picker.scroll(x, y, delta)) return true;
+        if (picker == null && detail != null && detail.scroll(x, y, delta)) return true;
+        return super.mouseScrolled(x, y, delta);
+    }
+    @Override public void render(GuiGraphics g, int mx, int my, float partial) {
+        if (picker != null) { picker.render(g, mx, my, partial); return; }
+        super.render(g, mx, my, partial);
+        if (detail != null && detail.visibleConditions < RuleConditions.Type.values().length) {
+            int y = detail.conditionY, h = detail.visibleConditions * 20;
+            g.fill(width - 18, y, width - 15, y + h, IRON);
+            int thumb = h * detail.visibleConditions / RuleConditions.Type.values().length;
+            int top = y + h * detail.firstCondition / RuleConditions.Type.values().length;
+            g.fill(width - 18, top, width - 15, top + thumb, MUTED);
         }
     }
-
-    private void openSpellPicker(MagicRule rule) {
-        ClientMagicProvider provider = ClientMagicProviders.get(selectedProvider);
-        if (provider == null || rule == null) {
-            return;
-        }
-        Map<String, String> byName = new LinkedHashMap<>();
-        String current = "";
-        for (String spellId : provider.getSpellIds()) {
-            String name = provider.getDisplayName(spellId) + " [" + spellId + "]";
-            byName.put(name, spellId);
-            if (spellId.equals(rule.spellId)) {
-                current = name;
-            }
-        }
-        setSubGui(new GuiSelectSpell(this, byName, current, picked -> {
-            rule.spellId = picked;
-            rule.enabled = true;
-            int maxLevel = Math.max(1, provider.getMaxLevel(picked));
-            if (rule.level > maxLevel) {
-                rule.level = maxLevel;
-            }
-        }));
+    CompoundTag snapshot() {
+        CompoundTag providers = new CompoundTag(); rules.forEach((id, list) -> providers.put(id, MagicDataStore.saveRules(list)));
+        CompoundTag result = new CompoundTag(); result.put("providers", providers); result.putUUID("npc", npc.getUUID()); return result;
     }
-
-    @Override
-    public void unFocused(GuiTextFieldNop field) {
-        MagicRule rule = currentRule();
-        if (rule == null) {
-            return;
-        }
-        switch (field.id) {
-            case 20 -> rule.level = readInt(field, 1, 100, 1);
-            case 21 -> rule.casts = readInt(field, 1, 100, 3);
-            case 22 -> rule.cooldownTicks = readInt(field, 0, 3600, 10) * 20;
-            case 23 -> rule.range = readInt(field, 1, 64, 6);
-            default -> {
-            }
-        }
+    @Override public void setGuiData(CompoundTag data) {
+        if (!data.hasUUID("npc") || !data.getUUID("npc").equals(npc.getUUID())) return;
+        detail = null; rules.clear(); CompoundTag providers = data.getCompound("providers");
+        for (String id : providers.getAllKeys()) rules.put(id, MagicDataStore.loadRules(providers.get(id)));
+        library.clear(); CompoundTag definitions = data.getCompound("library");
+        for (String id : definitions.getAllKeys()) { SpellDefinition d = SpellDefinition.load(definitions.getCompound(id)); library.put(d.id, d); }
+        synced = true; baseline = snapshot().copy(); if (minecraft.screen == this) rebuild();
     }
-
-    private int readInt(GuiTextFieldNop field, int min, int max, int def) {
-        return field.isInteger() ? Mth.clamp(field.getInteger(), min, max) : def;
+    boolean flushDetail() { return detail == null || detail.apply(); }
+    public void save() { if (!synced || saving || !flushDetail()) return; pendingSave = snapshot().copy(); saving = true; status = text("saving"); NetworkHandler.CHANNEL.sendToServer(new C2SMagicSave(pendingSave)); rebuild(); }
+    void saved(CompoundTag data) {
+        if (!data.hasUUID("npc") || !data.getUUID("npc").equals(npc.getUUID())) return;
+        if (!saving || pendingSave == null) return;
+        if (snapshot().equals(pendingSave)) {
+            detail = null; rules.clear(); CompoundTag accepted = data.getCompound("providers");
+            for (String id : accepted.getAllKeys()) rules.put(id, MagicDataStore.loadRules(accepted.get(id)));
+        }
+        baseline = new CompoundTag(); baseline.putUUID("npc", npc.getUUID()); baseline.put("providers", data.getCompound("providers").copy());
+        saving = false; pendingSave = null; status = text("saved");
+        if (leaveAfterSave && baseline.equals(snapshot())) returnAppearance(); else { leaveAfterSave = false; if (minecraft.screen == this) rebuild(); }
     }
-
-    private void applyFields() {
-        for (int id : new int[]{20, 21, 22, 23}) {
-            GuiTextFieldNop field = getTextField(id);
-            if (field != null) {
-                unFocused(field);
-            }
+    private void returnAppearance() {
+        EntityNPCInterface current = npc;
+        if (minecraft.level != null) for (var entity : minecraft.level.entitiesForRendering()) if (entity instanceof EntityNPCInterface n && n.getUUID().equals(npc.getUUID())) { current = n; break; }
+        MagicEditor.editor = null; minecraft.setScreen(new GuiNpcDisplay(current));
+    }
+    public boolean ready() { return synced && !saving; }
+    public void verifyIndependent(boolean change) {
+        for (ClientMagicProvider p : ClientMagicProviders.all()) {
+            List<MagicRule> entries = rules.get(p.getId());
+            if (entries == null || entries.size() < 2) continue;
+            if (entries.get(1).independent || entries.get(0).independent != !change) throw new IllegalStateException("Per-entry independent setting mismatch");
+            if (change) entries.get(0).independent = true;
         }
     }
-
-    @Override
-    public void scrollClicked(double mouseX, double mouseY, int mouseButton, GuiCustomScrollNop scroll) {
-        if (scroll.id != 100 && scroll.id != 101) {
-            return;
-        }
-        applyFields();
-        String name = scroll.getSelected();
-        if (name == null) {
-            return;
-        }
-        if (scroll.id == 101) {
-            // Number prefixes keep repeated spells independently selectable.
-            selectedRule = Integer.parseInt(name.substring(0, name.indexOf('.'))) - 1;
-            init();
-            return;
-        }
-        for (ClientMagicProvider provider : ClientMagicProviders.all()) {
-            if (providerName(provider.getId()).equals(name)) {
-                selectedProvider = provider.getId();
-                selectedRule = 0;
-                init();
-                return;
-            }
-        }
+    @Override public void onClose() {
+        if (picker != null) { picker.close(false); return; }
+        if (saving) { status = text("saving"); return; }
+        if (!flushDetail()) return;
+        if (!synced || baseline.equals(snapshot())) { returnAppearance(); return; }
+        minecraft.setScreen(new LeaveScreen(this, () -> { leaveAfterSave = true; minecraft.setScreen(this); save(); }, this::returnAppearance));
     }
-
-    @Override
-    public void scrollDoubleClicked(String selection, GuiCustomScrollNop scroll) {
-    }
-
-    @Override
-    public void setGuiData(CompoundTag data) {
-        if (!data.contains("providers")) {
-            return;
+    static final class LeaveScreen extends EditorScreen {
+        final Runnable save, discard;
+        LeaveScreen(EditorScreen parent, Runnable save, Runnable discard) { super(parent, "unsaved"); this.save = save; this.discard = discard; }
+        @Override protected void init() {
+            super.init(); int x = Math.max(14, (width - 280) / 2), w = Math.min(280, width - 28);
+            label(x, 54, "unsavedHint"); button(x, 82, w, "save", save); button(x, 108, w, "discard", discard); button(x, 134, w, "continue", this::onClose);
         }
-        CompoundTag providers = data.getCompound("providers");
-        for (String providerId : providers.getAllKeys()) {
-            rules.put(providerId, MagicDataStore.loadRules(providers.get(providerId)));
-        }
-        synced = true;
-        init();
-    }
-
-    @Override
-    public void save() {
-        if (!synced) {
-            return;
-        }
-        applyFields();
-        CompoundTag providers = new CompoundTag();
-        for (Map.Entry<String, List<MagicRule>> entry : rules.entrySet()) {
-            providers.put(entry.getKey(), MagicDataStore.saveRules(entry.getValue()));
-        }
-        CompoundTag tag = new CompoundTag();
-        tag.put("providers", providers);
-        NetworkHandler.CHANNEL.sendToServer(new C2SMagicSave(tag));
     }
 }

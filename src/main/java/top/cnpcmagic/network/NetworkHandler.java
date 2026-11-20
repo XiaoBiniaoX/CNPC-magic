@@ -8,7 +8,7 @@ import top.cnpcmagic.CNPCMagic;
 import java.util.Optional;
 
 public final class NetworkHandler {
-    private static final String PROTOCOL = "2";
+    private static final String PROTOCOL = "4";
 
     public static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
         new ResourceLocation(CNPCMagic.MODID, "main"),
@@ -28,5 +28,9 @@ public final class NetworkHandler {
             C2SMagicSave::handle, Optional.of(NetworkDirection.PLAY_TO_SERVER));
         CHANNEL.registerMessage(id++, S2CNpcAnimation.class, S2CNpcAnimation::encode, S2CNpcAnimation::decode,
             S2CNpcAnimation::handle, Optional.of(NetworkDirection.PLAY_TO_CLIENT));
+        CHANNEL.registerMessage(id++, S2CMagicEditor.class, S2CMagicEditor::encode, S2CMagicEditor::decode,
+            S2CMagicEditor::handle, Optional.of(NetworkDirection.PLAY_TO_CLIENT));
+        CHANNEL.registerMessage(id++, C2MMagicEditor.class, C2MMagicEditor::encode, C2MMagicEditor::decode,
+            C2MMagicEditor::handle, Optional.of(NetworkDirection.PLAY_TO_SERVER));
     }
 }

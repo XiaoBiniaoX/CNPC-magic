@@ -2,7 +2,9 @@ package top.cnpcmagic.client.compat.ars;
 
 import com.hollingsworth.arsnouveau.api.registry.GlyphRegistry;
 import com.hollingsworth.arsnouveau.api.spell.AbstractSpellPart;
+import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.entity.LivingEntity;
 import top.cnpcmagic.client.provider.ClientMagicProvider;
 import top.cnpcmagic.compat.ars.ArsAdapter;
 
@@ -37,5 +39,12 @@ public class ArsClientProvider implements ClientMagicProvider {
     @Override
     public int getMaxLevel(String id) {
         return ArsAdapter.getMaxLevel(id);
+    }
+
+    @Override
+    public List<Component> describe(String id, int level, LivingEntity caster) {
+        var spell = ArsAdapter.getSpell(id, level);
+        return spell == null ? List.of() : List.of(Component.translatable("cnpcmagic.editor.propertyAmplify", level - 1),
+            Component.translatable("cnpcmagic.editor.propertySpell", id));
     }
 }

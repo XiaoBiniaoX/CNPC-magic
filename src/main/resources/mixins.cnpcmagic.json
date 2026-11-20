@@ -7,6 +7,7 @@
   "mixins": [
     "MixinGoetyScriptTarget",
     "MixinIronCastData",
+    "MixinWizardryFireSigil",
     "MixinLivingScriptMagic",
     "MixinNpcDataReference",
     "MixinScriptCarrierMagic"

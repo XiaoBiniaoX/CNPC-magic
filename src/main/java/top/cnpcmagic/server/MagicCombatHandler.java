@@ -16,8 +16,10 @@ import top.cnpcmagic.provider.MagicProviders;
 import top.cnpcmagic.provider.MagicCast;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.HashMap;
+import java.util.IdentityHashMap;
 import java.util.Map;
 import java.util.UUID;
 
@@ -32,7 +34,7 @@ public final class MagicCombatHandler {
         if (!(event.getEntity() instanceof EntityNPCInterface npc) || npc.level().isClientSide()) {
             return;
         }
-        if (ScriptMagic.isCasting(npc)) return;
+        if (ScriptMagic.isCasting(npc) || MagicPreview.isPreview(npc)) return;
         if (!npc.isAlive()) {
             reset(npc);
             return;
@@ -54,9 +56,10 @@ public final class MagicCombatHandler {
         for (MagicProvider provider : MagicProviders.all()) {
             for (MagicRule rule : store.getRules(npc, provider.getId())) entries.add(new Entry(provider, rule));
         }
-        tickOrdered(npc, target, state, now, entries.stream().filter(e -> !e.rule.independent).toList());
+        tickOrdered(npc, target, state, now, entries.stream().filter(e -> !e.rule.independent)
+            .sorted(Comparator.comparingInt(e -> e.rule.sequenceOrder())).toList());
         tickIndependent(npc, target, state, now, entries);
-        // SavedData updates normally reset the state; also handle rules removed by in-process integrations.
+        // Editor saves normally reset the state; also handle rules removed by in-process integrations.
         for (MagicRule rule : new ArrayList<>(state.rules.keySet())) {
             if (entries.stream().anyMatch(e -> e.rule == rule)) continue;
             RuleState runtime = state.rules.remove(rule);
@@ -76,21 +79,23 @@ public final class MagicCombatHandler {
             try {
                 RuleState owner = state.rules.get(state.activeRule);
                 if (NpcAnimationSync.withOwner(owner, true, () -> state.active.tick(npc, target))) {
-                    RuleState runtime = state.rules.get(state.activeRule);
-                    if (state.active.wasSuccessful()) {
-                        if (runtime.completed(now, state.activeRule)) {
-                            state.nextIndex++;
-                        }
-                    } else {
-                        runtime.readyAt = now + 20;
-                        state.nextIndex++;
-                    }
+                    MagicRule rule = state.activeRule;
+                    boolean success = state.active.wasSuccessful();
                     state.active = null;
                     state.nextCast = now + 10;
+                    if (success) {
+                        if (owner.completed(now, rule)) {
+                            state.nextIndex++;
+                        }
+                        if (state.meleeFollowup) meleeFollowup(npc, target);
+                    } else {
+                        owner.readyAt = now + 20;
+                        state.nextIndex++;
+                    }
                 }
             } catch (RuntimeException | LinkageError e) {
                 CNPCMagic.LOGGER.error("NPC {} failed during {}", npc.getUUID(), state.activeRule.spellId, e);
-                cancel(npc, state);
+                if (state.active != null) cancel(npc, state);
                 state.rules.get(state.activeRule).readyAt = now + 100;
             }
             return;
@@ -109,16 +114,18 @@ public final class MagicCombatHandler {
             if (!runtime.isReady(now)) {
                 continue;
             }
-            if (npc.distanceToSqr(target) > (double) rule.range * rule.range) {
+            if (!rule.conditions.test(npc, target, rule.range)) {
                 continue;
             }
             face(npc, target);
             try {
                 MagicCast cast = NpcAnimationSync.withOwner(runtime, true,
-                    () -> entry.provider.startCast(npc, rule.spellId, rule.level, target));
+                    () -> top.cnpcmagic.casting.CastingService.start(npc, rule.spellId, rule.level,
+                        top.cnpcmagic.casting.SpellTarget.entity(target), "npc_ai").cast());
                 if (cast != null) {
                     state.active = cast;
                     state.activeRule = rule;
+                    state.meleeFollowup = entry.provider.requiresMeleeTarget(rule.spellId);
                     state.target = target.getUUID();
                     state.nextIndex = index;
                     return;
@@ -152,22 +159,26 @@ public final class MagicCombatHandler {
                 face(npc, target);
                 try {
                     if (NpcAnimationSync.withOwner(owner, false, () -> owner.active.tick(npc, target))) {
-                        if (runtime.active.wasSuccessful()) runtime.completed(now, rule);
-                        else runtime.readyAt = now + 20;
+                        boolean success = runtime.active.wasSuccessful();
                         runtime.active = null;
+                        if (success) {
+                            runtime.completed(now, rule);
+                            if (entry.provider.requiresMeleeTarget(rule.spellId)) meleeFollowup(npc, target);
+                        } else runtime.readyAt = now + 20;
                     }
                 } catch (RuntimeException | LinkageError e) {
                     CNPCMagic.LOGGER.error("NPC {} failed during independent {}", npc.getUUID(), rule.spellId, e);
-                    cancelIndependent(npc, runtime);
+                    if (runtime.active != null) cancelIndependent(npc, runtime);
                     runtime.readyAt = now + 100;
                 }
                 continue;
             }
-            if (!runtime.isReady(now) || npc.distanceToSqr(target) > (double) rule.range * rule.range) continue;
+            if (!runtime.isReady(now) || !rule.conditions.test(npc, target, rule.range)) continue;
             face(npc, target);
             try {
                 runtime.active = NpcAnimationSync.withOwner(owner, false,
-                    () -> entry.provider.startCast(npc, rule.spellId, rule.level, target));
+                    () -> top.cnpcmagic.casting.CastingService.start(npc, rule.spellId, rule.level,
+                        top.cnpcmagic.casting.SpellTarget.entity(target), "npc_ai").cast());
                 if (runtime.active != null) runtime.target = target.getUUID();
                 else runtime.readyAt = now + 20;
             } catch (RuntimeException | LinkageError e) {
@@ -242,6 +253,14 @@ public final class MagicCombatHandler {
         NpcAnimationSync.clear();
     }
 
+    static void meleeFollowup(EntityNPCInterface npc, LivingEntity target) {
+        float range = npc.stats.melee.getRange();
+        if (target.isAlive() && npc.distanceToSqr(target) <= range * range + target.getBbWidth() && npc.hasLineOfSight(target)) {
+            npc.swing(net.minecraft.world.InteractionHand.MAIN_HAND);
+            npc.doHurtTarget(target);
+        }
+    }
+
     public static void face(LivingEntity npc, LivingEntity target) {
         double dx = target.getX() - npc.getX();
         double dz = target.getZ() - npc.getZ();
@@ -265,7 +284,9 @@ public final class MagicCombatHandler {
         private long nextCast;
         private MagicCast active;
         private MagicRule activeRule;
-        private final Map<MagicRule, RuleState> rules = new HashMap<>();
+        private boolean meleeFollowup;
+        // Rule configuration is mutable; runtime ownership follows the rule instance, not its value hash.
+        private final Map<MagicRule, RuleState> rules = new IdentityHashMap<>();
     }
 
     public static final class RuleState {

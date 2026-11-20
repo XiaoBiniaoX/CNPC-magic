@@ -9,5 +9,7 @@ public interface MagicProvider {
 
     int getMaxLevel(String spellId);
 
+    default boolean requiresMeleeTarget(String spellId) { return false; }
+
     MagicCast startCast(LivingEntity caster, String spellId, int level, LivingEntity target);
 }

@@ -3,6 +3,7 @@ package top.cnpcmagic.client.compat.goety;
 import com.Polarice3.Goety.api.magic.ISpell;
 import net.minecraft.client.model.HumanoidModel;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.item.ItemStack;
@@ -31,6 +32,15 @@ public class GoetyClientProvider implements ClientMagicProvider {
     @Override
     public int getMaxLevel(String id) {
         return GoetyAdapter.getMaxLevel(id);
+    }
+
+    @Override
+    public List<Component> describe(String id, int level, LivingEntity caster) {
+        ISpell spell = GoetyAdapter.getSpell(id);
+        if (spell == null) return List.of();
+        return List.of(Component.translatable("cnpcmagic.editor.propertyTimes", spell.defaultCastDuration() / 20.0, spell.defaultSpellCooldown() / 20.0),
+            Component.translatable("cnpcmagic.editor.propertySouls", spell.defaultSoulCost()),
+            Component.translatable("cnpcmagic.editor.propertyPotency", level - 1));
     }
 
     @SuppressWarnings("unchecked") // Renderer supplies this entity's model; wildcard erases its entity type.
