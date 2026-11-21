@@ -17,5 +17,8 @@ public final class NetworkHandler {
         registered = true;
         CHANNEL.registerMessage(C2SMagicRequest.Handler.class, C2SMagicRequest.class, 0, Side.SERVER);
         CHANNEL.registerMessage(C2SMagicSave.Handler.class, C2SMagicSave.class, 1, Side.SERVER);
+        CHANNEL.registerMessage(C2SPreviewStart.Handler.class, C2SPreviewStart.class, 2, Side.SERVER);
+        CHANNEL.registerMessage(C2SPreviewStop.Handler.class, C2SPreviewStop.class, 3, Side.SERVER);
+        CHANNEL.registerMessage(S2CPreviewStatus.Handler.class, S2CPreviewStatus.class, 4, Side.CLIENT);
     }
 }

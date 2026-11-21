@@ -40,7 +40,7 @@ public final class MagicCombatHandler {
     public static void livingTick(LivingEvent.LivingUpdateEvent event) {
         if (!(event.getEntityLiving() instanceof EntityNPCInterface)) return;
         EntityNPCInterface npc = (EntityNPCInterface) event.getEntityLiving();
-        if (npc.world.isRemote || ScriptMagic.isCasting(npc)) return;
+        if (npc.world.isRemote || MagicPreview.isPreviewEntity(npc) || ScriptMagic.isCasting(npc)) return;
         if (npc.isDead) {
             reset(npc);
             return;

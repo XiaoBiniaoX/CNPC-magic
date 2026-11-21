@@ -16,6 +16,7 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import top.cnpcmagic.data.MagicDataAccess;
+import top.cnpcmagic.data.MagicNpcData;
 import top.cnpcmagic.wizardry.MagicCasterAccess;
 
 @Mixin(value = EntityNPCInterface.class, remap = false)
@@ -31,13 +32,16 @@ public abstract class MixinEntityNPCInterface implements ISpellCaster, MagicCast
     private void cnpcmagic$writeDataReference(NBTTagCompound compound, CallbackInfo callback) {
         UUID reference = cnpcmagic$dataId;
         if (reference == null) reference = ((EntityNPCInterface) (Object) this).getUniqueID();
-        compound.setString("CNPCMagicDataId", reference.toString());
+        compound.setString(MagicNpcData.DATA_ID_KEY, reference.toString());
+        MagicNpcData.saveNpc((EntityNPCInterface) (Object) this, compound);
     }
 
-    @Inject(method = "func_70037_a", at = @At("RETURN"), require = 1)
+    @Inject(method = "func_70037_a", at = @At("HEAD"), require = 1)
     private void cnpcmagic$readDataReference(NBTTagCompound compound, CallbackInfo callback) {
+        EntityNPCInterface npc = (EntityNPCInterface) (Object) this;
+        MagicNpcData.prepareLoad(npc, compound);
         cnpcmagic$dataId = null;
-        String reference = compound.getString("CNPCMagicDataId");
+        String reference = compound.getString(MagicNpcData.DATA_ID_KEY);
         if (reference.length() != 36) return;
         try {
             cnpcmagic$dataId = UUID.fromString(reference);

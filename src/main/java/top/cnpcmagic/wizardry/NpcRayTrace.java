@@ -20,7 +20,8 @@ public final class NpcRayTrace {
         // Keep the native nearest hit as the limit, so this cannot shoot through walls or other entities.
         Vec3d limit = result == null ? endpoint : result.hitVec;
         double closest = origin.squareDistanceTo(limit);
-        AxisAlignedBB nearby = new AxisAlignedBB(origin, origin).grow(1 + Math.max(0, aimAssist));
+        AxisAlignedBB nearby = new AxisAlignedBB(origin.x, origin.y, origin.z, origin.x, origin.y, origin.z)
+            .grow(1 + Math.max(0, aimAssist));
         for (Entity entity : world.getEntitiesWithinAABB(entityType, nearby)) {
             if (filter.test(entity) || !EntityUtils.isLiving(entity) || entity instanceof ICustomHitbox) continue;
             AxisAlignedBB bounds = entity.getEntityBoundingBox();
