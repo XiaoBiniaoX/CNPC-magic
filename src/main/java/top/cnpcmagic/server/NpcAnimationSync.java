@@ -64,9 +64,9 @@ public final class NpcAnimationSync {
 
     private static void send(LivingEntity npc, Animation animation) {
         int elapsed = animation == null ? 0 : (int) (npc.level().getGameTime() - animation.start);
-        NetworkHandler.CHANNEL.send(PacketDistributor.TRACKING_ENTITY_AND_SELF.with(() -> npc),
-            new S2CNpcAnimation(npc.getUUID(), animation == null ? "" : animation.id, elapsed,
-                animation == null ? 0 : animation.duration));
+        var packet = new S2CNpcAnimation(npc.getUUID(), animation == null ? "" : animation.id, elapsed,
+            animation == null ? 0 : animation.duration);
+        NetworkHandler.CHANNEL.send(PacketDistributor.TRACKING_ENTITY_AND_SELF.with(() -> npc), packet);
     }
 
     private static void refresh(LivingEntity npc, State state) {

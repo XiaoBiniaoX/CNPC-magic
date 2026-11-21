@@ -165,9 +165,10 @@ final class SpellPicker {
         int backdrop = 0xFF444749;
         g.fill(0, 0, editor.width, y, backdrop); g.fill(0, bottom, editor.width, editor.height, backdrop);
         g.fill(0, y, x, bottom, backdrop); g.fill(right, y, editor.width, bottom, backdrop);
-        if (active && editor.client().level != null && editor.client().level.dimension().equals(top.cnpcmagic.server.MagicPreview.DIMENSION)) {
+        if (active) {
             g.fill(x, y, right, vy, PAPER); g.fill(x, vy + vh, right, bottom, PAPER);
             g.fill(x, vy, vx, vy + vh, PAPER); g.fill(vx + vw, vy, right, vy + vh, PAPER);
+            top.cnpcmagic.client.PreviewScene.render(g, vx, vy, vw, vh, partial);
             g.renderOutline(vx - 1, vy - 1, vw + 2, vh + 2, EDGE);
         } else {
             g.fill(x, y, right, bottom, PAPER);

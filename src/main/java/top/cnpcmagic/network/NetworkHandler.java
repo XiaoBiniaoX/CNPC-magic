@@ -8,7 +8,7 @@ import top.cnpcmagic.CNPCMagic;
 import java.util.Optional;
 
 public final class NetworkHandler {
-    private static final String PROTOCOL = "4";
+    private static final String PROTOCOL = "5";
 
     public static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
         new ResourceLocation(CNPCMagic.MODID, "main"),

@@ -35,6 +35,12 @@ public final class EditorClientVerification {
     private static final String[] WIZARDRY_PREVIEWS = {"fire_sigil", "detonate", "enrage", "entrapment", "heal", "frost_ray", "cobwebs", "ice_spikes", "arcane_lock", "font_of_mana", "frost_sigil"};
     private static int wizardryIndex;
     private static java.util.UUID wizardryActor;
+    private static net.minecraft.client.multiplayer.ClientLevel originalLevel;
+    private static net.minecraft.client.player.LocalPlayer originalPlayer;
+    private static net.minecraft.world.phys.Vec3 originalPosition;
+    private static float originalYaw, originalPitch;
+    private static net.minecraft.world.level.GameType originalMode;
+    private static int stationaryChecks;
 
     @SubscribeEvent
     public static void joined(net.minecraftforge.event.entity.EntityJoinLevelEvent event) {
@@ -64,7 +70,7 @@ public final class EditorClientVerification {
         Minecraft mc = Minecraft.getInstance();
         if (!Boolean.getBoolean("cnpcmagic.verify.editor") || editor == null || editor.picker == null
             || !editor.picker.active || mc.level == null
-            || !mc.level.dimension().location().toString().equals("cnpcmagic:preview")
+            || top.cnpcmagic.client.PreviewScene.instance() == null
             || !entity.getName().getString().equals("Preview") || Math.abs(model.rightArm.xRot) < 0.5) return;
         if (poseTick == ticks) return;
         poseRun = poseTick == ticks - 1 ? poseRun + 1 : 1;
@@ -148,9 +154,25 @@ public final class EditorClientVerification {
     public static void tick(TickEvent.ClientTickEvent event) {
         if (!Boolean.getBoolean("cnpcmagic.verify.editor") || finished || event.phase != TickEvent.Phase.END) return;
         Minecraft mc = Minecraft.getInstance();
+        if (Boolean.getBoolean("cnpcmagic.verify.hotfix") && mc.screen instanceof net.minecraft.client.gui.screens.ConfirmScreen
+            && mc.screen.getTitle().getString().equals(net.minecraft.network.chat.Component.translatable("selectWorld.backupQuestion.experimental").getString())) {
+            CNPCMagic.LOGGER.info("HOTFIX isolated copied world: accepting experimental-dimension confirmation");
+            mc.screen.children().stream().filter(child -> child instanceof Button button
+                && button.getMessage().getString().equals(net.minecraft.network.chat.CommonComponents.GUI_PROCEED.getString()))
+                .map(Button.class::cast).findFirst().orElseThrow().onPress();
+            return;
+        }
         if (mc.player == null || mc.level == null) return;
         ticks++;
         try {
+            if (originalLevel != null) {
+                check(mc.level == originalLevel && mc.player == originalPlayer, "preview never replaces real level/player");
+                check(mc.player.position().distanceToSqr(originalPosition) < 0.0001, "preview never moves real player");
+                check(Math.abs(mc.player.getYRot() - originalYaw) < 0.01 && Math.abs(mc.player.getXRot() - originalPitch) < 0.01,
+                    "preview never rotates real player");
+                check(mc.gameMode.getPlayerMode() == originalMode, "preview never changes real game mode");
+                stationaryChecks++;
+            }
             check(!loadingScreenEscaped, "preview loading screen was cancelled before display");
             if (ticks > (Boolean.getBoolean("cnpcmagic.verify.wizardryEditor") ? 5000 : 1800))
                 throw new IllegalStateException("Editor screenshot fixture timed out at stage " + stage + " spell=" + WIZARDRY_PREVIEWS[wizardryIndex]);
@@ -167,12 +189,12 @@ public final class EditorClientVerification {
                     }
                     case 3, 5 -> {
                         if (editor.picker == null || !editor.picker.active
-                            || !mc.level.dimension().location().toString().equals("cnpcmagic:preview")) return;
+                            || top.cnpcmagic.client.PreviewScene.instance() == null) return;
                         check(mc.screen == editor && MagicEditor.isPreviewTransitionActive(), "Wizardry preview retains editor");
                         String selected = "ebwizardry:" + WIZARDRY_PREVIEWS[wizardryIndex];
                         check(editor.picker.selected.equals(selected) && editor.picker.level.equals("1")
                             && editor.picker.hasProperties(), "Wizardry selected spell and properties retained");
-                        var actors = java.util.stream.StreamSupport.stream(mc.level.entitiesForRendering().spliterator(), false).toList();
+                        var actors = java.util.stream.StreamSupport.stream(top.cnpcmagic.client.PreviewScene.instance().entitiesForRendering().spliterator(), false).toList();
                         var caster = actors.stream().filter(entity -> entity instanceof EntityNPCInterface && entity.getName().getString().equals("Preview"))
                             .map(entity -> (EntityNPCInterface) entity).findFirst().orElse(null);
                         var target = actors.stream().filter(entity -> entity instanceof net.minecraft.world.entity.Mob && entity.getName().getString().equals("Target"))
@@ -185,7 +207,7 @@ public final class EditorClientVerification {
                             case "cobwebs" -> java.util.stream.StreamSupport.stream(net.minecraft.core.BlockPos.betweenClosed(
                                 target.blockPosition().offset(-2, -1, -2), target.blockPosition().offset(2, 2, 2)).spliterator(), false)
                                 .anyMatch(pos -> new net.minecraft.resources.ResourceLocation("ebwizardry:vanishing_cobweb").equals(
-                                    net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(mc.level.getBlockState(pos).getBlock())));
+                                    net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(top.cnpcmagic.client.PreviewScene.instance().getBlockState(pos).getBlock())));
                             default -> target.getHealth() < target.getMaxHealth();
                         };
                         if (!effect || !editor.picker.status.isEmpty()) return;
@@ -208,7 +230,8 @@ public final class EditorClientVerification {
                     case 7 -> {
                         if (editor.picker != null || editor.saving) return;
                         check(mc.screen == editor && !MagicEditor.isPreviewTransitionActive(), "Wizardry returns to editor and clears transition");
-                        check(suppressedLoadingScreens >= 2 && suppressedProgressScreens >= 2, "Wizardry preview suppresses both loading screens on entry and return");
+                        check(suppressedLoadingScreens == 0 && suppressedProgressScreens == 0, "detached preview needs no loading screens");
+                        check(top.cnpcmagic.client.PreviewScene.instance() == null, "preview scene released on close");
                         for (Screen screen : java.util.List.of(new net.minecraft.client.gui.screens.ReceivingLevelScreen(),
                             new net.minecraft.client.gui.screens.ProgressScreen(true))) {
                             check(!net.minecraftforge.common.MinecraftForge.EVENT_BUS.post(
@@ -231,6 +254,8 @@ public final class EditorClientVerification {
                         shot("05-wizardry-reopened", editor);
                     }
                     case 10 -> {
+                        CNPCMagic.LOGGER.info("HOTFIX PLAYER UNCHANGED checks={} dimension={} position={} mode={}", stationaryChecks,
+                            mc.level.dimension().location(), mc.player.position(), mc.gameMode.getPlayerMode());
                         CNPCMagic.LOGGER.info("EDITOR CLIENT PASS COMPLETE: WIZARDRY {} spells real preview, replay, switching, return, draft save and reopen; nativeSigils={}, suppressedLoadingScreens={}, suppressedProgressScreens={}",
                             WIZARDRY_PREVIEWS.length, wizardrySigils, suppressedLoadingScreens, suppressedProgressScreens);
                         finished = true;
@@ -252,6 +277,8 @@ public final class EditorClientVerification {
                 }
                 case 1 -> {
                     if (!editor.ready()) return;
+                    originalLevel = mc.level; originalPlayer = mc.player; originalPosition = mc.player.position();
+                    originalYaw = mc.player.getYRot(); originalPitch = mc.player.getXRot(); originalMode = mc.gameMode.getPlayerMode();
                     shot("01-main-wide", editor);
                 }
                 case 2 -> {
@@ -305,14 +332,14 @@ public final class EditorClientVerification {
                 }
                 case 8 -> {
                     if (editor.picker == null || !editor.picker.active
-                        || !mc.level.dimension().location().toString().equals("cnpcmagic:preview")) return;
+                        || top.cnpcmagic.client.PreviewScene.instance() == null) return;
                     check(MagicEditor.isPreviewTransitionActive(), "preview transition state during initial transfer");
                     check(mc.screen == editor, "editor remains visible during initial preview transfer: "
                         + (mc.screen == null ? "null" : mc.screen.getClass().getName()));
                     check(editor.picker.selected.equals("cnpcmagic:channel_beam")
                         && editor.picker.level.equals("1") && editor.picker.hasProperties(),
                         "selected spell draft survives initial preview transfer");
-                    boolean targetDamaged = java.util.stream.StreamSupport.stream(mc.level.entitiesForRendering().spliterator(), false)
+                    boolean targetDamaged = java.util.stream.StreamSupport.stream(top.cnpcmagic.client.PreviewScene.instance().entitiesForRendering().spliterator(), false)
                         .anyMatch(entity -> entity instanceof net.minecraft.world.entity.LivingEntity living
                             && living.getName().getString().equals("Target") && living.getHealth() < living.getMaxHealth());
                     if (!heldPose || !targetDamaged) return;
@@ -325,7 +352,7 @@ public final class EditorClientVerification {
                 }
                 case 10 -> {
                     if (editor.picker == null || !editor.picker.active
-                        || !mc.level.dimension().location().toString().equals("cnpcmagic:preview") || ticks - at < 55) return;
+                        || top.cnpcmagic.client.PreviewScene.instance() == null || ticks - at < 55) return;
                     check(mc.screen == editor, "editor remains visible during preview replay");
                     check(editor.picker.selected.equals("cnpcmagic:channel_beam")
                         && editor.picker.level.equals("1") && editor.picker.hasProperties(),
@@ -400,7 +427,7 @@ public final class EditorClientVerification {
                 }
                 case 19 -> {
                     if (editor.picker == null || !editor.picker.active) return;
-                    boolean echo = java.util.stream.StreamSupport.stream(mc.level.entitiesForRendering().spliterator(), false)
+                    boolean echo = java.util.stream.StreamSupport.stream(top.cnpcmagic.client.PreviewScene.instance().entitiesForRendering().spliterator(), false)
                         .anyMatch(entity -> new net.minecraft.resources.ResourceLocation("irons_spellbooks:echoing_sword")
                             .equals(net.minecraftforge.registries.ForgeRegistries.ENTITY_TYPES.getKey(entity.getType())));
                     if (!echo) return;
@@ -409,7 +436,7 @@ public final class EditorClientVerification {
                 case 20 -> press(editor, "self");
                 case 21 -> {
                     if (ticks - at < 35) return;
-                    var actors = java.util.stream.StreamSupport.stream(mc.level.entitiesForRendering().spliterator(), false).toList();
+                    var actors = java.util.stream.StreamSupport.stream(top.cnpcmagic.client.PreviewScene.instance().entitiesForRendering().spliterator(), false).toList();
                     check(actors.stream().anyMatch(entity -> entity instanceof net.minecraft.world.entity.LivingEntity living
                         && living.getName().getString().equals("Target") && living.getHealth() == living.getMaxHealth()),
                         "self-mode preview does not strike the target");
@@ -419,8 +446,7 @@ public final class EditorClientVerification {
                     if (editor.picker != null) return;
                     check(!MagicEditor.isPreviewTransitionActive(), "preview transition state cleared after return");
                     check(mc.screen == editor, "editor restored after preview return");
-                     check(suppressedLoadingScreens >= 2, "loading screens suppressed during preview entry and return");
-                    check(suppressedProgressScreens >= 2, "progress screens suppressed during preview entry and return");
+                    check(suppressedLoadingScreens == 0 && suppressedProgressScreens == 0, "no preview loading screens or transitions");
                     for (Screen screen : java.util.List.of(new net.minecraft.client.gui.screens.ReceivingLevelScreen(),
                         new net.minecraft.client.gui.screens.ProgressScreen(true))) {
                         var opening = new net.minecraftforge.client.event.ScreenEvent.Opening(editor, screen);
@@ -439,6 +465,8 @@ public final class EditorClientVerification {
                     shot("10-return-appearance", mc.screen);
                 }
                 case 25 -> {
+                    CNPCMagic.LOGGER.info("HOTFIX PLAYER UNCHANGED checks={} dimension={} position={} mode={}", stationaryChecks,
+                        mc.level.dimension().location(), mc.player.position(), mc.gameMode.getPlayerMode());
                     CNPCMagic.LOGGER.info("EDITOR CLIENT PASS COMPLETE: same-screen conditions, delivery segments, cast order save and reopen, real preview, suppressedLoadingScreens={}, suppressedProgressScreens={}", suppressedLoadingScreens, suppressedProgressScreens);
                     finished = true;
                     mc.stop();

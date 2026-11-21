@@ -6,7 +6,7 @@ import top.cnpcmagic.casting.SpellDefinition;
 import top.cnpcmagic.network.C2MMagicEditor;
 import top.cnpcmagic.network.NetworkHandler;
 
-/** Editor session survives Screen changes and the two dimension transfers used by real preview. */
+/** Editor drafts and the detached preview scene share one editing session. */
 public final class MagicEditor {
     static GuiNpcMagic editor;
     static DefinitionEditor definition;
@@ -35,11 +35,14 @@ public final class MagicEditor {
             case "definitionDeleted" -> { if (editor != null) { editor.library.remove(data.getString("id")); if (Minecraft.getInstance().screen == editor) editor.rebuild(); } }
             case "previewBegin" -> {
                 previewTransition = true;
+                top.cnpcmagic.client.PreviewScene.open(net.minecraft.core.BlockPos.of(data.getLong("origin")));
                 if (picker != null) picker.begin();
             }
+            case "previewFrame" -> top.cnpcmagic.client.PreviewScene.receive(data);
             case "previewStatus" -> { if (picker != null && !picker.closing && picker.request == data.getInt("request")) picker.status = data.getString("message"); }
             case "previewError" -> { if (picker != null && !picker.closing && picker.request == data.getInt("request")) picker.error(data.getString("message")); }
             case "previewEnd" -> {
+                top.cnpcmagic.client.PreviewScene.dispose();
                 if (picker != null) picker.end();
                 previewTransition = false;
             }
