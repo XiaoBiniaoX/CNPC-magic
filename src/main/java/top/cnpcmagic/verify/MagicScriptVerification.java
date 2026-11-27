@@ -6,10 +6,10 @@ import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.animal.Pig;
-import net.minecraftforge.event.TickEvent;
-import net.minecraftforge.event.entity.player.PlayerEvent;
-import net.minecraftforge.event.server.ServerStartedEvent;
-import net.minecraftforge.eventbus.api.SubscribeEvent;
+import net.neoforged.neoforge.event.tick.*;
+import net.neoforged.neoforge.event.entity.player.PlayerEvent;
+import net.neoforged.neoforge.event.server.ServerStartedEvent;
+import net.neoforged.bus.api.SubscribeEvent;
 import noppes.npcs.CustomBlocks;
 import noppes.npcs.CustomEntities;
 import noppes.npcs.api.NpcAPI;
@@ -20,7 +20,6 @@ import noppes.npcs.api.event.BlockEvent;
 import noppes.npcs.api.event.ItemEvent;
 import noppes.npcs.api.event.NpcEvent;
 import noppes.npcs.api.item.IItemScripted;
-import noppes.npcs.controllers.Jsr223Executor;
 import top.cnpcmagic.CNPCMagic;
 import top.cnpcmagic.provider.MagicProviders;
 import top.cnpcmagic.server.ScriptMagic;
@@ -48,6 +47,7 @@ public final class MagicScriptVerification {
         viewStage = 0;
         ServerLevel world = event.getServer().overworld();
         var guardNpc = CustomEntities.entityCustomNpc.create(world);
+        MagicVerification.prepareArena(world, new BlockPos(210, 80, 0));
         guardNpc.moveTo(210.5, 80, 0.5, 0, 0);
         guardNpc.setNoAi(true);
         guardNpc.setInvulnerable(true);
@@ -55,11 +55,12 @@ public final class MagicScriptVerification {
         world.addFreshEntity(guardNpc);
         directGuards("NPC", new NpcEvent((ICustomNpc) NpcAPI.Instance().getIEntity(guardNpc)), "event.npc", guardNpc);
         directGuards("block", blockEvent(world, 210, guardNpc), "event.entity", guardNpc);
-        int x = 220;
+        int x = 480;
         for (String provider : List.of("irons_spellbooks", "goety")) {
             if (MagicProviders.get(provider) == null) continue;
             for (String context : List.of("NPC", "block")) {
                 var npc = CustomEntities.entityCustomNpc.create(world);
+                MagicVerification.prepareArena(world, new BlockPos(x, 80, 0));
                 npc.moveTo(x + 0.5, 80, 0.5, 0, 0);
                 npc.setNoAi(true);
                 npc.setInvulnerable(true);
@@ -119,7 +120,7 @@ public final class MagicScriptVerification {
 
     private static void add(LivingEntity caster, String spell, String context, Object event, String expression, double x, double z) {
         Pig target = target((ServerLevel) caster.level(), x, z);
-        Jsr223Executor executor = new Jsr223Executor();
+        CnpcScriptExecutor executor = new CnpcScriptExecutor();
         executor.initialize("ECMAScript", Map.of("target", NpcAPI.Instance().getIEntity(target)));
         String receiver = receiver(context);
         String args = carrier(context) ? expression + ", " : "";
@@ -144,7 +145,7 @@ public final class MagicScriptVerification {
     }
 
     private static void directGuards(String context, Object event, String expression, LivingEntity caster) {
-        Jsr223Executor executor = new Jsr223Executor();
+        CnpcScriptExecutor executor = new CnpcScriptExecutor();
         executor.initialize("ECMAScript", Map.of("target", NpcAPI.Instance().getIEntity(caster)));
         String receiver = receiver(context);
         String args = carrier(context) ? expression + ", " : "";
@@ -179,8 +180,17 @@ public final class MagicScriptVerification {
     }
 
     @SubscribeEvent
-    public static void tick(TickEvent.ServerTickEvent event) {
-        if (event.phase != TickEvent.Phase.END || Boolean.getBoolean("cnpcmagic.verify.reload")) return;
+    public static void damage(net.neoforged.neoforge.event.entity.living.LivingDamageEvent.Post event) {
+        if (event.getNewDamage() <= 0) return;
+        for (Trial trial : TRIALS) {
+            if (trial.target == event.getEntity() && event.getSource().getEntity() == trial.caster)
+                trial.nativeDamage += event.getNewDamage();
+        }
+    }
+
+    @SubscribeEvent
+    public static void tick(ServerTickEvent.Post event) {
+        if (Boolean.getBoolean("cnpcmagic.verify.reload")) return;
         for (Trial trial : TRIALS) {
             if (trial.reported) continue;
             trial.target.setPos(trial.anchor);
@@ -197,9 +207,20 @@ public final class MagicScriptVerification {
                 }
             } else if (!ScriptMagic.isCasting(trial.caster)) {
                 if (++trial.after < 12) continue; // Allow the actual projectile to reach its target.
+                if (trial.nativeDamage <= 0 && trial.after == 12) {
+                    List<String> projectiles = new ArrayList<>();
+                    for (var entity : ((ServerLevel)trial.caster.level()).getAllEntities()) {
+                        if (entity instanceof net.minecraft.world.entity.projectile.Projectile projectile && projectile.getOwner() == trial.caster)
+                            projectiles.add(entity.getType() + " pos=" + entity.position() + " velocity=" + entity.getDeltaMovement() + " age=" + entity.tickCount);
+                    }
+                    CNPCMagic.LOGGER.info("VERIFY script awaiting impact {} {} caster={} target={} projectiles={}",
+                        trial.context, trial.spell, trial.caster.position(), trial.target.position(), projectiles);
+                }
+                if (trial.nativeDamage <= 0 && trial.after < 60) continue;
                 float damage = 10000 - trial.target.getHealth();
                 trial.reported = true;
-                CNPCMagic.LOGGER.info("VERIFY {} script {} {} damage={}", damage > 0 ? "PASS" : "FAIL", trial.context, trial.spell, damage);
+                CNPCMagic.LOGGER.info("VERIFY {} script {} {} damage={} nativeDamage={} after={}", trial.nativeDamage > 0 ? "PASS" : "FAIL",
+                    trial.context, trial.spell, damage, trial.nativeDamage, trial.after);
                 trial.executor.close();
             }
         }
@@ -208,11 +229,12 @@ public final class MagicScriptVerification {
             long elapsed = viewer.level().getGameTime() - viewStart;
             boolean goety = MagicProviders.get("goety") != null;
             boolean iron = MagicProviders.get("irons_spellbooks") != null;
-            int x = goety ? 140 : 40;
+            boolean beam = Boolean.getBoolean("cnpcmagic.verify.ironGameplay");
+            int x = beam ? 60 : goety ? 140 : 40;
             if (viewStage == 0 && elapsed >= 200) {
                 viewer.connection.teleport(x + 6.5, 80, -2.5, 60, 5);
                 viewStage++;
-            } else if (viewStage == 1 && elapsed >= 400 && goety && iron) {
+            } else if (viewStage == 1 && elapsed >= 400 && (beam || goety && iron)) {
                 viewer.connection.teleport(46.5, 80, -2.5, 60, 5);
                 viewStage++;
             }
@@ -230,13 +252,14 @@ public final class MagicScriptVerification {
         final String spell;
         final String context;
         final Object event;
-        final Jsr223Executor executor;
+        final CnpcScriptExecutor executor;
         final net.minecraft.world.phys.Vec3 anchor;
         boolean started;
         boolean reported;
         int after;
+        float nativeDamage;
 
-        Trial(LivingEntity caster, Pig target, String spell, String context, Object event, Jsr223Executor executor) {
+        Trial(LivingEntity caster, Pig target, String spell, String context, Object event, CnpcScriptExecutor executor) {
             this.caster = caster;
             this.target = target;
             this.spell = spell;

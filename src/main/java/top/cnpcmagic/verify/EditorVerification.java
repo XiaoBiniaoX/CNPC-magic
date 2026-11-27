@@ -4,10 +4,10 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.GameType;
 import net.minecraft.world.level.block.Blocks;
-import net.minecraftforge.event.entity.player.PlayerEvent;
-import net.minecraftforge.event.TickEvent;
-import net.minecraftforge.event.server.ServerStartedEvent;
-import net.minecraftforge.eventbus.api.SubscribeEvent;
+import net.neoforged.neoforge.event.entity.player.PlayerEvent;
+import net.neoforged.neoforge.event.tick.*;
+import net.neoforged.neoforge.event.server.ServerStartedEvent;
+import net.neoforged.bus.api.SubscribeEvent;
 import noppes.npcs.CustomEntities;
 import noppes.npcs.NoppesUtilServer;
 import noppes.npcs.entity.EntityNPCInterface;
@@ -19,6 +19,7 @@ import java.util.Map;
 /** Isolated real-network UI fixture, explicitly enabled by the screenshot launcher. */
 public final class EditorVerification {
     private static EntityNPCInterface npc;
+    private static ServerPlayer pendingPlayer;
     private static net.minecraft.server.level.ServerLevel preview;
     private static final java.util.Set<java.util.UUID> enraged = new java.util.HashSet<>();
     private static final java.util.Set<java.util.UUID> nativeEffects = new java.util.HashSet<>();
@@ -48,30 +49,24 @@ public final class EditorVerification {
         world.setDefaultSpawnPos(new BlockPos(5, 80, -3), 60);
         top.cnpcmagic.CNPCMagic.LOGGER.info("EDITOR SERVER READY");
     }
-    @SubscribeEvent public static void login(PlayerEvent.PlayerLoggedInEvent event) {
+    @SubscribeEvent(priority = net.neoforged.bus.api.EventPriority.LOWEST) public static void login(PlayerEvent.PlayerLoggedInEvent event) {
         if (!(event.getEntity() instanceof ServerPlayer player)) return;
-        player.server.getPlayerList().op(player.getGameProfile()); player.setGameMode(GameType.CREATIVE);
+        player.server.getPlayerList().getOps().add(new net.minecraft.server.players.ServerOpListEntry(player.getGameProfile(), 4, false));
+        player.setGameMode(GameType.CREATIVE);
         player.teleportTo(player.server.overworld(), 5.5, 80, -3.5, 55, 5);
-        NoppesUtilServer.setEditingNpc(player, npc);
+        pendingPlayer = player;
     }
-    @SubscribeEvent public static void tick(TickEvent.ServerTickEvent event) {
-        if (event.phase != TickEvent.Phase.END || preview == null) return;
+    @SubscribeEvent public static void tick(ServerTickEvent.Post event) {
+        if (pendingPlayer != null && pendingPlayer.tickCount >= 40) {
+            NoppesUtilServer.setEditingNpc(pendingPlayer, npc);
+            top.cnpcmagic.CNPCMagic.LOGGER.info("EDITOR SERVER PERMISSION level4={} editingNpc={}",
+                pendingPlayer.hasPermissions(4), NoppesUtilServer.getEditingNpc(pendingPlayer) == npc);
+            pendingPlayer = null;
+        }
+        if (preview == null) return;
         for (var entity : preview.getAllEntities()) if (entity instanceof EntityNPCInterface caster
             && caster.getTarget() instanceof net.minecraft.world.entity.Mob target
             && target.getLastHurtByMob() == caster && target.getTarget() == caster && enraged.add(caster.getUUID()))
             top.cnpcmagic.CNPCMagic.LOGGER.info("EDITOR SERVER NATIVE enrage actual retaliation caster={} target={}", caster.getUUID(), target.getUUID());
-        if (top.cnpcmagic.provider.MagicProviders.get("ebwizardry") == null) return;
-        for (var entity : preview.getAllEntities()) {
-            if (entity instanceof net.minecraftforge.common.util.FakePlayer player && player.getActiveEffects().stream()
-                .anyMatch(effect -> net.minecraft.core.registries.BuiltInRegistries.MOB_EFFECT.getKey(effect.getEffect()).toString().equals("ebwizardry:font_of_mana"))
-                && nativeEffects.add(player.getUUID()))
-                top.cnpcmagic.CNPCMagic.LOGGER.info("EDITOR SERVER NATIVE font_of_mana actual recipient={}", player.getUUID());
-            if (entity instanceof EntityNPCInterface caster && caster.getTarget() != null
-                && preview.getBlockEntity(net.minecraft.core.BlockPos.containing(
-                    top.cnpcmagic.compat.ebwizardry.EbWizardryAdapter.targetSurface(caster.getTarget()))) instanceof net.minecraft.world.level.block.entity.BaseContainerBlockEntity container
-                && caster.getUUID().equals(com.binaris.wizardry.core.platform.Services.OBJECT_DATA.getArcaneLockData(container).getArcaneLockOwnerUUID())
-                && nativeEffects.add(caster.getUUID()))
-                top.cnpcmagic.CNPCMagic.LOGGER.info("EDITOR SERVER NATIVE arcane_lock actual owner={}", caster.getUUID());
-        }
     }
 }

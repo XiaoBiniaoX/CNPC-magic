@@ -24,6 +24,9 @@ final class SpellPicker {
     final RuleEditor edit;
     final ClientMagicProvider provider;
     final List<String> ids;
+    final java.util.Map<String, Component> schools;
+    String school = "";
+    private boolean choosingSchool;
     String selected, level, target = "entity", status = "";
     boolean active, opening, closing, confirm;
     int request;
@@ -38,6 +41,7 @@ final class SpellPicker {
         this.editor = editor; this.edit = edit;
         provider = ClientMagicProviders.get(editor.provider);
         ids = provider == null ? editor.library.values().stream().filter(d -> d.enabled).map(d -> d.id).toList() : provider.getSpellIds();
+        schools = provider == null ? java.util.Map.of() : provider.getSchools();
         selected = edit == null ? "" : edit.rule.spellId;
         level = edit == null ? "1" : Integer.toString(edit.rule.level);
     }
@@ -54,9 +58,18 @@ final class SpellPicker {
         searchBox.setHint(tr("search"));
         int oldOffset = rows == null ? 0 : rows.offset;
         rows = editor.addRows(editor.new Rows(left, top + 23, side, foot - top - 23, new ArrayList<>(), -1, i -> {
-            selected = filtered.get(i); scroll = 0; update(); preview();
+            if (choosingSchool) {
+                school = i == 0 ? "" : new ArrayList<>(schools.keySet()).get(i - 1);
+                choosingSchool = false; rows.offset = 0; editor.rebuild();
+            } else { selected = filtered.get(i); scroll = 0; update(); preview(); }
         }));
         rows.offset = oldOffset;
+        if (!schools.isEmpty()) {
+            int schoolWidth = Math.min(172, w - 275);
+            var schoolButton = editor.buttonText(x + w - 101 - schoolWidth, y + 7, schoolWidth,
+                school.isEmpty() ? tr("allSchools") : schools.get(school), () -> { choosingSchool = !choosingSchool; editor.rebuild(); });
+            schoolButton.setTooltip(net.minecraft.client.gui.components.Tooltip.create(format("schoolFilter", schoolButton.getMessage())));
+        }
         filter();
         int levelWidth = Math.min(100, vw / 2);
         editor.label(vx, foot - 20, "cnpcmagic.gui.level");
@@ -70,8 +83,13 @@ final class SpellPicker {
 
     private void filter() {
         String query = search.strip().toLowerCase(Locale.ROOT);
-        filtered = ids.stream().filter(id -> (id + " " + editor.name(id)).toLowerCase(Locale.ROOT).contains(query)).toList();
-        rows.names.clear(); filtered.forEach(id -> rows.names.add(editor.name(id))); rows.selected = filtered.indexOf(selected);
+        filtered = ids.stream().filter(id -> school.isEmpty() || school.equals(provider.getSchoolId(id)))
+            .filter(id -> (id + " " + editor.name(id)).toLowerCase(Locale.ROOT).contains(query)).toList();
+        rows.names.clear();
+        if (choosingSchool) {
+            rows.names.add(text("allSchools")); schools.values().forEach(name -> rows.names.add(name.getString()));
+            rows.selected = school.isEmpty() ? 0 : new ArrayList<>(schools.keySet()).indexOf(school) + 1;
+        } else { filtered.forEach(id -> rows.names.add(editor.name(id))); rows.selected = filtered.indexOf(selected); }
     }
 
     private int parsedLevel() {
@@ -186,7 +204,7 @@ final class SpellPicker {
             int top = vy + 32 + (track - thumb) * scroll / (info.size() - infoRows());
             g.fill(ix + iw - 3, top, ix + iw - 1, top + thumb, MUTED);
         }
-        if (filtered.isEmpty()) g.drawString(editor.editorFont(), tr("noSpells"), x + 15, vy + 30, MUTED, false);
+        if (filtered.isEmpty() && !choosingSchool) g.drawString(editor.editorFont(), tr("noSpells"), x + 15, vy + 30, MUTED, false);
         if (!status.isEmpty()) g.drawString(editor.editorFont(), editor.editorFont().plainSubstrByWidth(status, Math.max(1, w - 12)), x + 10, bottom - 10,
             status.startsWith("!") ? RED : MUTED, false);
         editor.drawControls(g, mx, my, partial);

@@ -40,7 +40,17 @@ public abstract class EditorScreen extends Screen {
         return input(x + caption, y, Math.max(36, w - caption), key, value, change);
     }
     EditBox input(int x, int y, int w, String key, String value, Consumer<String> change) {
-        EditBox box = new EditBox(font, x, y, w, 18, tr(key));
+        EditBox box = new EditBox(font, x, y, w, 18, tr(key)) {
+            @Override public void renderWidget(GuiGraphics g, int mx, int my, float partial) {
+                super.renderWidget(g, mx, my, partial);
+                if (isVisible() && isBordered()) {
+                    // 1.21 draws its sprite border inside the field; preserve the source editor's outer border.
+                    g.renderOutline(getX(), getY(), getWidth(), getHeight(), 0xFF000000);
+                    g.renderOutline(getX() - 1, getY() - 1, getWidth() + 2, getHeight() + 2,
+                        isFocused() ? 0xFFFFFFFF : 0xFFA0A0A0);
+                }
+            }
+        };
         box.setMaxLength(4096); box.setValue(value); box.setResponder(change); addRenderableWidget(box); return box;
     }
     void segments(int x, int y, int w, String label, String[] keys, int selected, IntConsumer change) {
@@ -63,13 +73,14 @@ public abstract class EditorScreen extends Screen {
             button.selected = i == selected; addRenderableWidget(button);
         }
     }
-    @Override public void tick() { for (var child : children()) if (child instanceof EditBox box) box.tick(); }
     @Override public void render(GuiGraphics g, int mx, int my, float partial) {
         g.fill(0, 0, width, height, IRON); panel(g, 6, 34, width - 12, height - 62, PAPER);
         g.drawString(font, font.plainSubstrByWidth(title.getString(), Math.max(1, width - 220)), 102, 13, INK, false);
         drawControls(g, mx, my, partial);
         drawStatus(g, status, 9, height - 18, width - 18);
     }
+    // This opaque editor draws its own background before Screen renders the widgets.
+    @Override public void renderBackground(GuiGraphics g, int mx, int my, float partial) { }
     void drawControls(GuiGraphics g, int mx, int my, float partial) {
         for (Label label : labels) g.drawString(font, font.plainSubstrByWidth(label.text.getString(), Math.max(1, width - label.x - 14)), label.x, label.y, INK, false);
         super.render(g, mx, my, partial);
@@ -123,7 +134,7 @@ public abstract class EditorScreen extends Screen {
             if (row >= 0 && row / 22 < capacity() && index < names.size()) { selected = index; pick.accept(index); }
         }
         int capacity() { return Math.max(1, (height - 4) / 22); }
-        @Override public boolean mouseScrolled(double x, double y, double delta) { if (!isMouseOver(x, y)) return false; offset -= (int)(delta * 3); return true; }
+        @Override public boolean mouseScrolled(double x, double y, double horizontal, double delta) { if (!isMouseOver(x, y)) return false; offset -= (int)(delta * 3); return true; }
          @Override public boolean keyPressed(int key, int scan, int modifiers) {
             if (names.isEmpty()) return super.keyPressed(key, scan, modifiers);
             if (key == 264 || key == 265) { selected = Mth.clamp(selected + (key == 264 ? 1 : -1), 0, names.size() - 1); offset = Math.max(0, selected - (height - 4) / 22 + 1); if (!names.isEmpty()) pick.accept(selected); return true; }

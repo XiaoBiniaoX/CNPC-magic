@@ -13,6 +13,19 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class IronClientProvider implements ClientMagicProvider {
+    public static void renderNpc(net.neoforged.neoforge.client.event.RenderLivingEvent.Post<?, ?> event) {
+        if (!(event.getEntity() instanceof noppes.npcs.entity.EntityNPCInterface npc)) return;
+        var data = io.redspace.ironsspellbooks.player.ClientMagicData.getSyncedSpellData(npc);
+        if (data.isCasting()) {
+            io.redspace.ironsspellbooks.render.SpellRenderingHelper.renderSpellHelper(
+                data, npc, event.getPoseStack(), event.getMultiBufferSource(), event.getPartialTick());
+            if (data.getCastingSpellId().equals("irons_spellbooks:ray_of_siphoning")) {
+                top.cnpcmagic.client.gui.EditorClientVerification.ironRendered(npc);
+                top.cnpcmagic.client.MagicClientVerification.ironRendered(npc);
+            }
+        }
+    }
+
     @Override
     public String getId() {
         return "irons_spellbooks";
@@ -46,6 +59,22 @@ public class IronClientProvider implements ClientMagicProvider {
     @Override
     public boolean requiresMeleeTarget(String spellId) {
         return spellId.equals("irons_spellbooks:echoing_strikes");
+    }
+
+    @Override
+    public java.util.Map<String, Component> getSchools() {
+        var schools = new java.util.LinkedHashMap<String, Component>();
+        for (AbstractSpell spell : IronAdapter.getEnabledSpells()) {
+            var school = spell.getSchoolType();
+            schools.putIfAbsent(school.getId().toString(), school.getDisplayName());
+        }
+        return schools;
+    }
+
+    @Override
+    public String getSchoolId(String spellId) {
+        AbstractSpell spell = IronAdapter.getSpell(spellId);
+        return IronAdapter.isSupportedSpell(spell) ? spell.getSchoolType().getId().toString() : "";
     }
 
     @Override

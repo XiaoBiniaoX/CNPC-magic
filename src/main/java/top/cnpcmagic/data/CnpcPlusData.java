@@ -4,6 +4,7 @@ import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.world.level.saveddata.SavedData;
+import net.minecraft.core.HolderLookup;
 import noppes.npcs.CustomNpcs;
 import top.cnpcmagic.CNPCMagic;
 
@@ -16,7 +17,7 @@ import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
 
-/** Uses CNPCplus 4.0.6's verified external store; SavedData supplies only the world lifecycle. */
+/** Uses CNPCplus 4.2.0's verified external store; SavedData supplies only the world lifecycle. */
 public abstract class CnpcPlusData extends SavedData {
     private static final String REFERENCE = "CNPCMagicStoreId", STATE = "CNPCMagicStoreState", PAYLOAD = "CNPCMagicPayload";
     private static final Constructor<?> CONSTRUCTOR;
@@ -35,13 +36,13 @@ public abstract class CnpcPlusData extends SavedData {
 
     public static <T extends CnpcPlusData> T get(MinecraftServer server, String legacyName, String category,
                                                 Function<CompoundTag, T> loader, Supplier<T> fresh) {
-        return server.overworld().getDataStorage().computeIfAbsent(legacy -> {
-            CompoundTag external = read(category);
-            T data = loader.apply(external == null ? legacy : external); data.setDirty(); return data;
-        }, () -> {
+        return server.overworld().getDataStorage().computeIfAbsent(new SavedData.Factory<>(() -> {
             CompoundTag external = read(category);
             T data = external == null ? fresh.get() : loader.apply(external); data.setDirty(); return data;
-        }, legacyName);
+        }, (legacy, registries) -> {
+            CompoundTag external = read(category);
+            T data = loader.apply(external == null ? legacy : external); data.setDirty(); return data;
+        }), legacyName);
     }
     public static File directory(String category) {
         File root = CustomNpcs.getLevelSaveDirectory();
@@ -73,7 +74,9 @@ public abstract class CnpcPlusData extends SavedData {
         if (tag.contains(PAYLOAD)) throw new IllegalStateException("CNPCplus did not verify the write; original retained: " + file(category));
         setDirty(false);
     }
-    @Override public final void save(File ignoredLegacyFile) {
+    public abstract CompoundTag save(CompoundTag tag);
+    @Override public final CompoundTag save(CompoundTag tag, HolderLookup.Provider registries) { return save(tag); }
+    @Override public final void save(File ignoredLegacyFile, HolderLookup.Provider registries) {
         if (!isDirty()) return;
         try { flush(); }
         catch (IllegalStateException error) { CNPCMagic.LOGGER.error("CNPCplus magic data remains dirty for retry", error); }

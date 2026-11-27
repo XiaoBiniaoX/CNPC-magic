@@ -2,10 +2,10 @@ package top.cnpcmagic.server;
 
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.LivingEntity;
-import net.minecraftforge.event.entity.player.PlayerEvent;
-import net.minecraftforge.eventbus.api.SubscribeEvent;
-import net.minecraftforge.event.TickEvent;
-import net.minecraftforge.network.PacketDistributor;
+import net.neoforged.neoforge.event.entity.player.PlayerEvent;
+import net.neoforged.bus.api.SubscribeEvent;
+import net.neoforged.neoforge.event.tick.*;
+import net.neoforged.neoforge.network.PacketDistributor;
 import top.cnpcmagic.network.NetworkHandler;
 import top.cnpcmagic.network.S2CNpcAnimation;
 
@@ -66,7 +66,7 @@ public final class NpcAnimationSync {
         int elapsed = animation == null ? 0 : (int) (npc.level().getGameTime() - animation.start);
         var packet = new S2CNpcAnimation(npc.getUUID(), animation == null ? "" : animation.id, elapsed,
             animation == null ? 0 : animation.duration);
-        NetworkHandler.CHANNEL.send(PacketDistributor.TRACKING_ENTITY_AND_SELF.with(() -> npc), packet);
+        PacketDistributor.sendToPlayersTrackingEntityAndSelf(npc, packet);
     }
 
     private static void refresh(LivingEntity npc, State state) {
@@ -86,8 +86,8 @@ public final class NpcAnimationSync {
     }
 
     @SubscribeEvent
-    public static void tick(TickEvent.ServerTickEvent event) {
-        if (event.phase != TickEvent.Phase.END) return;
+    public static void tick(ServerTickEvent.Post event) {
+        
         for (var entry : new ArrayList<>(ACTIVE.entrySet())) refresh(entry.getKey(), entry.getValue());
     }
 
@@ -99,7 +99,7 @@ public final class NpcAnimationSync {
             if (animation != null) {
                 int elapsed = (int) (npc.level().getGameTime() - animation.start);
                 if (elapsed < animation.duration) {
-                    NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
+                    PacketDistributor.sendToPlayer(player,
                         new S2CNpcAnimation(npc.getUUID(), animation.id, elapsed, animation.duration));
                 } else {
                     refresh(npc, state);

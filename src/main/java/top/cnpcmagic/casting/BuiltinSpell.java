@@ -15,13 +15,13 @@ import net.minecraft.world.item.Items;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.*;
-import net.minecraftforge.event.TickEvent;
-import net.minecraftforge.event.entity.EntityJoinLevelEvent;
-import net.minecraftforge.event.entity.EntityLeaveLevelEvent;
-import net.minecraftforge.event.server.ServerStoppingEvent;
-import net.minecraftforge.eventbus.api.SubscribeEvent;
-import net.minecraftforge.network.NetworkHooks;
-import net.minecraftforge.registries.*;
+import net.neoforged.neoforge.event.tick.*;
+import net.neoforged.neoforge.event.entity.EntityJoinLevelEvent;
+import net.neoforged.neoforge.event.entity.EntityLeaveLevelEvent;
+import net.neoforged.neoforge.event.server.ServerStoppingEvent;
+import net.neoforged.bus.api.SubscribeEvent;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.neoforged.neoforge.registries.*;
 import top.cnpcmagic.provider.*;
 import top.cnpcmagic.server.NpcAnimationSync;
 import top.cnpcmagic.data.MagicRuntimeData;
@@ -30,12 +30,12 @@ import static top.cnpcmagic.casting.SpellDefinition.*;
 
 /** Native entities, collision and server-side effects are shared by gameplay and the preview arena. */
 public final class BuiltinSpell implements MagicProvider {
-    public static final DeferredRegister<EntityType<?>> ENTITIES = DeferredRegister.create(ForgeRegistries.ENTITY_TYPES, "cnpcmagic");
-    public static final RegistryObject<EntityType<Bolt>> BOLT = ENTITIES.register("spell_bolt", () -> EntityType.Builder
+    public static final DeferredRegister<EntityType<?>> ENTITIES = DeferredRegister.create(BuiltInRegistries.ENTITY_TYPE, "cnpcmagic");
+    public static final DeferredHolder<EntityType<?>, EntityType<Bolt>> BOLT = ENTITIES.register("spell_bolt", () -> EntityType.Builder
         .<Bolt>of(Bolt::new, MobCategory.MISC).sized(0.25f, 0.25f).clientTrackingRange(64).updateInterval(1).noSave().build("cnpcmagic:spell_bolt"));
     private static final Map<UUID, Entity> SUMMONS = new HashMap<>();
     public String getId() { return "cnpcmagic"; }
-    public boolean isValidSpell(String id) { return ResourceLocation.tryParse(id) != null; }
+    public boolean isValidSpell(String id) { var key = ResourceLocation.tryParse(id); return key != null && key.getNamespace().equals(getId()); }
     public int getMaxLevel(String id) { return 10; }
     public MagicCast startCast(LivingEntity caster, String id, int level, LivingEntity target) {
         // CastingService takes this branch directly with its complete target descriptor.
@@ -47,7 +47,7 @@ public final class BuiltinSpell implements MagicProvider {
         private Cast cast;
         public Bolt(EntityType<? extends Bolt> type, Level level) { super(type, level); }
         protected Item getDefaultItem() { return Items.AMETHYST_SHARD; }
-        @Override protected float getGravity() { return cast == null ? 0 : (float)cast.definition.gravity; }
+        @Override protected double getDefaultGravity() { return cast == null ? 0 : cast.definition.gravity; }
         @Override protected boolean canHitEntity(Entity entity) { return super.canHitEntity(entity) && (cast == null || entity instanceof LivingEntity l && cast.accepts(l)); }
         @Override public void tick() {
             if (!level().isClientSide && (cast == null || tickCount > cast.definition.duration || getOwner() == null || !getOwner().isAlive())) { discard(); return; }
@@ -64,7 +64,6 @@ public final class BuiltinSpell implements MagicProvider {
                 discard();
             }
         }
-        @Override public Packet<ClientGamePacketListener> getAddEntityPacket() { return NetworkHooks.getEntitySpawningPacket(this); }
     }
     public static final class Cast implements MagicCast {
         final CastingService.Context context;
@@ -166,7 +165,7 @@ public final class BuiltinSpell implements MagicProvider {
                 case DAMAGE -> successful |= target.hurt(world.damageSources().indirectMagic(caster, caster), (float)amount);
                 case HEALING -> { target.heal((float)amount); successful = true; }
                 case STATUS -> {
-                    var status = ForgeRegistries.MOB_EFFECTS.getValue(new ResourceLocation(e.id));
+                    var status = BuiltInRegistries.MOB_EFFECT.getHolder(ResourceLocation.parse(e.id)).orElse(null);
                     if (status != null) successful |= target.addEffect(new MobEffectInstance(status, e.duration, Math.max(0, (int)e.amount - 1)), caster);
                 }
                 case MOTION -> {
@@ -175,12 +174,12 @@ public final class BuiltinSpell implements MagicProvider {
                 }
                 case VISUAL -> { world.sendParticles(ParticleTypes.ENCHANT, p.x, p.y, p.z, Math.min(128, Math.max(1, (int)e.amount)), 0.5, 0.5, 0.5, 0.05); successful = true; }
                 case AUDIO -> {
-                    var sound = ForgeRegistries.SOUND_EVENTS.getValue(new ResourceLocation(e.id));
+                    var sound = BuiltInRegistries.SOUND_EVENT.get(ResourceLocation.parse(e.id));
                     if (sound != null) { world.playSound(null, p.x, p.y, p.z, sound, SoundSource.NEUTRAL, (float)Math.min(4, e.amount), 1); successful = true; }
                 }
                 case SUMMON -> {
                     if (SUMMONS.size() >= 128) return;
-                    EntityType<?> type = ForgeRegistries.ENTITY_TYPES.getValue(new ResourceLocation(e.id));
+                    EntityType<?> type = BuiltInRegistries.ENTITY_TYPE.get(ResourceLocation.parse(e.id));
                     if (type == null || !type.canSummon()) return;
                     Entity entity = type.create(world);
                     if (entity == null || entity instanceof noppes.npcs.entity.EntityNPCInterface || entity instanceof net.minecraft.world.entity.player.Player) return;
@@ -216,8 +215,8 @@ public final class BuiltinSpell implements MagicProvider {
         Entity entity = event.getEntity(); SUMMONS.remove(entity.getUUID());
         if (entity.getRemovalReason() != null && entity.getRemovalReason().shouldDestroy()) MagicRuntimeData.get(world.getServer()).removeSummon(entity.getUUID());
     }
-    @SubscribeEvent public static void tick(TickEvent.ServerTickEvent event) {
-        if (event.phase != TickEvent.Phase.END) return;
+    @SubscribeEvent public static void tick(ServerTickEvent.Post event) {
+        
         for (Entity entity : new ArrayList<>(SUMMONS.values())) {
             if (!(entity.level() instanceof ServerLevel world)) continue;
             MagicRuntimeData runtime = MagicRuntimeData.get(world.getServer()); CompoundTag tag = runtime.getSummon(entity.getUUID());

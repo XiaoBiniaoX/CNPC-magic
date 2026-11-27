@@ -8,10 +8,10 @@ import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.animal.Pig;
 import net.minecraft.world.level.block.Blocks;
-import net.minecraftforge.event.TickEvent;
-import net.minecraftforge.event.entity.player.PlayerEvent;
-import net.minecraftforge.event.server.ServerStartedEvent;
-import net.minecraftforge.eventbus.api.SubscribeEvent;
+import net.neoforged.neoforge.event.tick.*;
+import net.neoforged.neoforge.event.entity.player.PlayerEvent;
+import net.neoforged.neoforge.event.server.ServerStartedEvent;
+import net.neoforged.bus.api.SubscribeEvent;
 import noppes.npcs.CustomEntities;
 import noppes.npcs.NoppesUtilServer;
 import noppes.npcs.entity.EntityNPCInterface;
@@ -114,9 +114,7 @@ public final class IndependentVerification {
 
     private static void create(ServerLevel world, int x, String provider, List<MagicRule> rules) {
         for (int cx = (x - 4) >> 4; cx <= (x + 4) >> 4; cx++) world.setChunkForced(cx, 0, true);
-        for (int dx = -4; dx <= 4; dx++) {
-            for (int z = -2; z <= 10; z++) world.setBlock(new BlockPos(x + dx, 79, z), Blocks.STONE.defaultBlockState(), 3);
-        }
+        MagicVerification.prepareArena(world, new BlockPos(x, 80, 0));
         EntityNPCInterface npc = CustomEntities.entityCustomNpc.create(world);
         npc.moveTo(x + 0.5, 80, 0.5, 0, 0);
         npc.setNoAi(true);
@@ -194,8 +192,8 @@ public final class IndependentVerification {
     }
 
     @SubscribeEvent
-    public static void tick(TickEvent.ServerTickEvent event) {
-        if (event.phase != TickEvent.Phase.END || reported || PROBES.isEmpty() || Boolean.getBoolean("cnpcmagic.verify.reload")) return;
+    public static void tick(ServerTickEvent.Post event) {
+        if (reported || PROBES.isEmpty() || Boolean.getBoolean("cnpcmagic.verify.reload")) return;
         long elapsed = PROBES.get(0).npc.level().getGameTime() - start;
         for (Probe probe : PROBES) {
             probe.target.setPos(probe.anchor);

@@ -3,7 +3,7 @@ package top.cnpcmagic.data;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.LivingEntity;
-import net.minecraftforge.registries.ForgeRegistries;
+import net.minecraft.core.registries.BuiltInRegistries;
 import top.cnpcmagic.casting.CastingService;
 import java.util.EnumSet;
 
@@ -16,6 +16,56 @@ public final class RuleConditions {
     public String casterEffect = "", targetEffect = "", previousSpell = "";
     public int comboTicks = 100;
 
+    /** Capture on the server thread. The returned value contains no entities, worlds or registry holders. */
+    public Snapshot snapshot(LivingEntity caster, LivingEntity target, int maximumRange) {
+        int mask = 0;
+        for (Type type : enabled) mask |= 1 << type.ordinal();
+        boolean casterHasEffect = false, targetHasEffect = false, previousMatches = false;
+        if (enabled.contains(Type.CASTER_EFFECT)) {
+            var id = ResourceLocation.tryParse(casterEffect);
+            var effect = id == null ? null : BuiltInRegistries.MOB_EFFECT.getHolder(id).orElse(null);
+            casterHasEffect = effect != null && caster.hasEffect(effect);
+        }
+        if (enabled.contains(Type.TARGET_EFFECT)) {
+            var id = ResourceLocation.tryParse(targetEffect);
+            var effect = id == null ? null : BuiltInRegistries.MOB_EFFECT.getHolder(id).orElse(null);
+            targetHasEffect = effect != null && target.hasEffect(effect);
+        }
+        if (enabled.contains(Type.PREVIOUS_SPELL)) {
+            var last = CastingService.lastSuccess(caster);
+            long now = caster.level().getGameTime();
+            previousMatches = last != null && last.spellId().equals(previousSpell) && last.dimension().equals(caster.level().dimension())
+                && now - last.tick() >= 0 && now - last.tick() <= comboTicks;
+        }
+        return new Snapshot(mask, any,
+            enabled.contains(Type.RANGE) ? caster.distanceToSqr(target) : 0, minimumRange, maximumRange,
+            enabled.contains(Type.CASTER_HEALTH) ? caster.getHealth() * 100.0 / caster.getMaxHealth() : 0, casterHealth,
+            enabled.contains(Type.TARGET_HEALTH) ? target.getHealth() * 100.0 / target.getMaxHealth() : 0, targetHealth,
+            enabled.contains(Type.LINE_OF_SIGHT) && caster.hasLineOfSight(target), casterHasEffect, targetHasEffect, previousMatches);
+    }
+
+    public record Snapshot(int enabledMask, boolean any, double distanceSquared, double minimumRange, int maximumRange,
+                           double casterHealthPercent, double casterHealthLimit, double targetHealthPercent, double targetHealthLimit,
+                           boolean lineOfSight, boolean casterHasEffect, boolean targetHasEffect, boolean previousMatches) {
+        /** Pure decision: safe to evaluate on a worker thread. Keep source ALL/ANY and boundary semantics. */
+        public boolean test() {
+            for (Type type : Type.values()) {
+                if ((enabledMask & (1 << type.ordinal())) == 0) continue;
+                boolean matches = switch (type) {
+                    case RANGE -> distanceSquared >= minimumRange * minimumRange && distanceSquared <= (double)maximumRange * maximumRange;
+                    case CASTER_HEALTH -> casterHealthPercent <= casterHealthLimit;
+                    case TARGET_HEALTH -> targetHealthPercent <= targetHealthLimit;
+                    case LINE_OF_SIGHT -> lineOfSight;
+                    case CASTER_EFFECT -> casterHasEffect;
+                    case TARGET_EFFECT -> targetHasEffect;
+                    case PREVIOUS_SPELL -> previousMatches;
+                };
+                if (matches == any) return any;
+            }
+            return !any || enabledMask == 0;
+        }
+    }
+
     public boolean test(LivingEntity caster, LivingEntity target, int maximumRange) {
         if (enabled.isEmpty()) return true;
         for (Type type : enabled) {
@@ -26,7 +76,7 @@ public final class RuleConditions {
                 case LINE_OF_SIGHT -> caster.hasLineOfSight(target);
                 case CASTER_EFFECT, TARGET_EFFECT -> {
                     var id = ResourceLocation.tryParse(type == Type.CASTER_EFFECT ? casterEffect : targetEffect);
-                    var effect = id == null ? null : ForgeRegistries.MOB_EFFECTS.getValue(id);
+                    var effect = id == null ? null : BuiltInRegistries.MOB_EFFECT.getHolder(id).orElse(null);
                     yield effect != null && (type == Type.CASTER_EFFECT ? caster : target).hasEffect(effect);
                 }
                 case PREVIOUS_SPELL -> {

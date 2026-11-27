@@ -1,7 +1,7 @@
 package top.cnpcmagic.casting;
 
-import net.minecraftforge.eventbus.api.Event;
-import net.minecraftforge.eventbus.api.Cancelable;
+import net.neoforged.bus.api.Event;
+import net.neoforged.bus.api.ICancellableEvent;
 
 /** Server thread only. Request/Pre/Impact/Effect are cancellable; notifications are not. */
 public class SpellEvent extends Event {
@@ -11,7 +11,7 @@ public class SpellEvent extends Event {
     public SpellEvent(CastingService.Context context, String phase, SpellResult result) {
         this.context = context; this.phase = phase; this.result = result;
     }
-    @Cancelable public static final class Before extends SpellEvent {
+    public static final class Before extends SpellEvent implements ICancellableEvent {
         public Before(CastingService.Context context, String phase) { super(context, phase, null); }
     }
 }

@@ -23,14 +23,14 @@ public abstract class MixinNpcDataReference implements MagicDataAccess {
     @Unique
     private UUID cnpcmagic$dataId;
 
-    @Inject(method = "m_7380_", at = @At("RETURN"), require = 1)
+    @Inject(method = "addAdditionalSaveData", at = @At("RETURN"), require = 1)
     private void cnpcmagic$writeDataReference(CompoundTag tag, CallbackInfo callback) {
         EntityNPCInterface npc = (EntityNPCInterface) (Object) this;
         UUID reference = cnpcmagic$dataId == null ? npc.getUUID() : cnpcmagic$dataId;
         tag.putString(CNPCMAGIC_DATA_ID, reference.toString());
     }
 
-    @Inject(method = "m_7378_", at = @At("RETURN"), require = 1)
+    @Inject(method = "readAdditionalSaveData", at = @At("RETURN"), require = 1)
     private void cnpcmagic$readDataReference(CompoundTag tag, CallbackInfo callback) {
         cnpcmagic$dataId = null;
         String reference = tag.getString(CNPCMAGIC_DATA_ID);

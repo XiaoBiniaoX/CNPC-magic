@@ -9,11 +9,11 @@ import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.animal.Pig;
 import net.minecraft.world.level.block.Blocks;
-import net.minecraftforge.event.TickEvent;
-import net.minecraftforge.event.entity.EntityJoinLevelEvent;
-import net.minecraftforge.event.server.ServerStartedEvent;
-import net.minecraftforge.eventbus.api.SubscribeEvent;
-import net.minecraftforge.fml.ModList;
+import net.neoforged.neoforge.event.tick.*;
+import net.neoforged.neoforge.event.entity.EntityJoinLevelEvent;
+import net.neoforged.neoforge.event.server.ServerStartedEvent;
+import net.neoforged.bus.api.SubscribeEvent;
+import net.neoforged.fml.ModList;
 import noppes.npcs.CustomEntities;
 import noppes.npcs.entity.EntityNPCInterface;
 import top.cnpcmagic.CNPCMagic;
@@ -37,8 +37,62 @@ public final class MagicVerification {
     private static final String ECHO_SWORD = "irons_spellbooks:echoing_sword";
     private static long started;
     private static boolean reported;
+    private static long decisionChecks, orderChecks;
+    private static final UUID ASYNC_PROBE = UUID.randomUUID();
+    private static int asyncPhase;
+    private static long asyncReused;
+
+    public static void checkDecision(EntityNPCInterface caster, LivingEntity target, MagicRule rule, boolean matches) {
+        if (matches != rule.conditions.test(caster, target, rule.range)) {
+            CNPCMagic.LOGGER.error("VERIFY FAIL combat/source same-tick condition parity {}", rule.spellId);
+            throw new IllegalStateException("Combat decision differs from 1.20.1 conditions");
+        }
+        decisionChecks++;
+    }
+
+    public static void checkOrder(List<MagicRule> rules, List<Integer> actual) {
+        var expected = java.util.stream.IntStream.range(0, rules.size()).boxed().filter(i -> !rules.get(i).independent)
+            .sorted(java.util.Comparator.comparingInt(i -> rules.get(i).sequenceOrder())).toList();
+        if (!expected.equals(actual)) {
+            CNPCMagic.LOGGER.error("VERIFY FAIL combat/source ordered candidate parity");
+            throw new IllegalStateException("Combat order differs from 1.20.1");
+        }
+        orderChecks++;
+    }
+
+    private static void asyncChecks() {
+        var far = new top.cnpcmagic.data.RuleConditions.Snapshot(1, false, 100, 0, 8, 0, 0, 0, 0, false, false, false, false);
+        var near = new top.cnpcmagic.data.RuleConditions.Snapshot(1, false, 64, 0, 8, 0, 0, 0, 0, false, false, false, false);
+        var before = top.cnpcmagic.server.CombatDecisions.stats();
+        if (asyncPhase == 0) {
+            check(!top.cnpcmagic.server.CombatDecisions.test(ASYNC_PROBE, 0, far), "unready worker uses same-tick fallback");
+            asyncReused = before.reusedConditions(); asyncPhase++;
+        } else if (asyncPhase == 1) {
+            check(!top.cnpcmagic.server.CombatDecisions.test(ASYNC_PROBE, 0, far), "cached far decision");
+            if (top.cnpcmagic.server.CombatDecisions.stats().reusedConditions() == before.reusedConditions()) return;
+            check(top.cnpcmagic.server.CombatDecisions.test(ASYNC_PROBE, 0, near), "stale rejection cannot suppress in-range attack");
+            asyncPhase++;
+        } else if (asyncPhase == 2) {
+            check(top.cnpcmagic.server.CombatDecisions.test(ASYNC_PROBE, 0, near), "cached near decision");
+            if (top.cnpcmagic.server.CombatDecisions.stats().reusedConditions() == before.reusedConditions()) return;
+            check(!top.cnpcmagic.server.CombatDecisions.test(ASYNC_PROBE, 0, far), "stale acceptance cannot authorize out-of-range attack");
+            top.cnpcmagic.server.CombatDecisions.remove(ASYNC_PROBE);
+            check(top.cnpcmagic.server.CombatDecisions.stats().activeNpcs() == before.activeNpcs() - 1, "removed NPC leaves coordinator");
+            asyncPhase++;
+            CNPCMagic.LOGGER.info("VERIFY PASS safe async decisions: real worker reuse, unready same-tick fallback, stale false/true rejection, removal");
+        }
+    }
 
     private MagicVerification() {
+    }
+
+    // Keep optional Ars types out of the verifier also used by hard-dependency-only parity checks.
+    private static final class ArsFixture {
+        private static String harm() {
+            return top.cnpcmagic.compat.ars.ArsAdapter.getId(
+                com.hollingsworth.arsnouveau.common.spell.method.MethodProjectile.INSTANCE,
+                com.hollingsworth.arsnouveau.common.spell.effect.EffectHarm.INSTANCE);
+        }
     }
 
     private static void check(boolean condition, String message) {
@@ -115,11 +169,12 @@ public final class MagicVerification {
     @SubscribeEvent
     public static void onStarted(ServerStartedEvent event) {
         try {
-            for (String id : List.of("irons_spellbooks", "goety", "ebwizardry", "ars_nouveau")) {
+            for (String id : List.of("irons_spellbooks", "goety", "ars_nouveau")) {
                 check((MagicProviders.get(id) != null) == ModList.get().isLoaded(id), "optional provider " + id);
             }
             CNPCMagic.LOGGER.info("VERIFY PASS installed providers {}", MagicProviders.all().stream().map(MagicProvider::getId).toList());
             dataTests();
+            ConditionVerification.snapshots(event.getServer().overworld());
             if (Boolean.getBoolean("cnpcmagic.verify.reload")) {
                 var saved = MagicDataStore.get(event.getServer()).save(new CompoundTag()).getCompound("npcs");
                 check(!saved.isEmpty(), "SavedData present after real restart");
@@ -173,8 +228,13 @@ public final class MagicVerification {
             if (ModList.get().isLoaded("goety")) {
                 fixture(level, origin.offset(100, 0, 0), "goety", List.of(rule("goety:soul_bolt_focus", 2, 60, 1)));
                 fixture(level, origin.offset(120, 0, 0), "goety", List.of(rule("goety:magic_bolt_focus", 2, 60, 2)));
+                fixture(level, origin.offset(320, 0, 0), "goety", List.of(rule("goety:water_jet_focus", 1, 60, 1)));
                 fixture(level, origin.offset(140, 0, 0), "goety", List.of(rule("goety:fire_breath_focus", 1, 60, 1)));
                 fixture(level, origin.offset(160, 0, 0), "goety", List.of(rule("goety:prisma_beam_focus", 1, 60, 1)));
+                fixture(level, origin.offset(340, 0, 0), "goety", List.of(rule("goety:steaming_focus", 1, 60, 1)));
+            }
+            if (ModList.get().isLoaded("ars_nouveau")) {
+                fixture(level, origin.offset(280, 0, 0), "ars_nouveau", List.of(rule(ArsFixture.harm(), 1, 60, 1)));
             }
             fixture(level, origin.offset(80, 0, 0), "cnpcmagic_verify", List.of(
                 rule("cnpcmagic_verify:counter", 2, 60, 1), rule("cnpcmagic_verify:counter", 1, 100, 2)));
@@ -192,10 +252,12 @@ public final class MagicVerification {
         } catch (RuntimeException | LinkageError e) {
             reported = true;
             CNPCMagic.LOGGER.error("VERIFY FAIL setup", e);
+            if (Boolean.getBoolean("cnpcmagic.verify.exit")) event.getServer().halt(false);
         }
     }
 
     private static void fixture(ServerLevel level, BlockPos pos, String provider, List<MagicRule> rules) {
+        prepareArena(level, pos);
         EntityNPCInterface npc = CustomEntities.entityCustomNpc.create(level);
         Pig target = EntityType.PIG.create(level);
         check(npc != null && target != null, "fixture entities");
@@ -225,11 +287,33 @@ public final class MagicVerification {
         TRIALS.add(new Trial(npc, target, rules.get(0).spellId, rules.get(0).level));
     }
 
+    static void prepareArena(ServerLevel level, BlockPos origin) {
+        for (int x = (origin.getX() - 4) >> 4; x <= (origin.getX() + 4) >> 4; x++)
+            for (int z = (origin.getZ() - 2) >> 4; z <= (origin.getZ() + 12) >> 4; z++)
+                level.setChunkForced(x, z, true);
+        int cleared = 0;
+        for (int x = -4; x <= 4; x++) for (int z = -2; z <= 12; z++) {
+            level.setBlock(origin.offset(x, -1, z), Blocks.STONE.defaultBlockState(), 3);
+            for (int y = 0; y <= 6; y++) {
+                BlockPos pos = origin.offset(x, y, z);
+                if (!level.getBlockState(pos).isAir()) {
+                    level.setBlock(pos, Blocks.AIR.defaultBlockState(), 3);
+                    cleared++;
+                }
+            }
+        }
+        CNPCMagic.LOGGER.info("VERIFY arena origin={} removedObstructions={}", origin, cleared);
+    }
+
     @SubscribeEvent
     public static void entityJoined(EntityJoinLevelEvent event) {
-        if (reported || !(event.getEntity() instanceof net.minecraft.world.entity.projectile.Projectile sword)
-            || !new net.minecraft.resources.ResourceLocation(ECHO_SWORD).equals(net.minecraftforge.registries.ForgeRegistries.ENTITY_TYPES.getKey(sword.getType()))) return;
-        for (Trial trial : TRIALS) if (trial.npc == sword.getOwner()) trial.echoes++;
+        if (reported || !(event.getEntity() instanceof net.minecraft.world.entity.projectile.Projectile projectile)) return;
+        String id = net.minecraft.core.registries.BuiltInRegistries.ENTITY_TYPE.getKey(projectile.getType()).toString();
+        for (Trial trial : TRIALS) {
+            if (trial.npc != projectile.getOwner()) continue;
+            if (id.equals(ECHO_SWORD)) trial.echoes++;
+            if (trial.spell.equals("goety:steaming_focus") && id.equals("goety:steam_missile")) trial.projectiles++;
+        }
     }
 
     private static boolean hasRule(net.minecraft.nbt.Tag tag) {
@@ -244,8 +328,34 @@ public final class MagicVerification {
     }
 
     @SubscribeEvent
-    public static void onTick(TickEvent.ServerTickEvent event) {
-        if (event.phase != TickEvent.Phase.END || reported || TRIALS.isEmpty()) {
+    public static void damaged(net.neoforged.neoforge.event.entity.living.LivingDamageEvent.Post event) {
+        if (reported || event.getEntity().level().isClientSide || event.getNewDamage() <= 0) return;
+        for (Trial trial : TRIALS) {
+            if (event.getEntity() != trial.target) continue;
+            var attacker = event.getSource().getEntity();
+            // Ars Harm uses AbstractEffect.getPlayer: its FakePlayer retains the real caster's UUID.
+            boolean arsOwner = trial.spell.startsWith("ars_nouveau:")
+                && attacker instanceof net.neoforged.neoforge.common.util.FakePlayer
+                && attacker.getUUID().equals(trial.npc.getUUID());
+            if (attacker != trial.npc && !arsOwner) {
+                trial.otherDamageTypes.add(event.getSource().getMsgId());
+                continue;
+            }
+            if (arsOwner) trial.fakePlayerDamage += event.getNewDamage();
+            trial.nativeDamage += event.getNewDamage();
+            trial.damageTypes.add(event.getSource().getMsgId());
+            if (!trial.casting) continue;
+            long tick = trial.npc.level().getGameTime();
+            if (tick == trial.lastPulseTick) continue;
+            trial.lastPulseTick = tick;
+            trial.pulsesInCast++;
+            trial.maxPulsesInCast = Math.max(trial.maxPulsesInCast, trial.pulsesInCast);
+        }
+    }
+
+    @SubscribeEvent
+    public static void onTick(ServerTickEvent.Post event) {
+        if (reported || TRIALS.isEmpty()) {
             return;
         }
         for (Trial trial : TRIALS) {
@@ -253,6 +363,7 @@ public final class MagicVerification {
             trial.target.setDeltaMovement(net.minecraft.world.phys.Vec3.ZERO);
             trial.npc.setTarget(trial.target);
         }
+        asyncChecks();
         long elapsed = TRIALS.get(0).npc.level().getGameTime() - started;
         if (elapsed < 1200) {
             return;
@@ -275,19 +386,25 @@ public final class MagicVerification {
                     .equals(List.of("goety", "irons_spellbooks", "goety", "irons_spellbooks"));
                 CNPCMagic.LOGGER.info("VERIFY {} cross-provider order {}", passed ? "PASS" : "FAIL", trial.startOrder);
             }
-            if (trial.spell.equals("irons_spellbooks:acupuncture")) {
-                check(trial.starts >= 1 && trial.completed >= 1 && trial.levelsMatch
-                        && trial.observedLevel == 100 && damage > 0,
-                    "Iron acupuncture level 100 native cast");
+            boolean passed = trial.starts >= 3 && trial.completed >= 3 && trial.nativeDamage > 0;
+            if (trial.spell.equals("irons_spellbooks:fire_breath") || trial.spell.equals("irons_spellbooks:ray_of_siphoning")
+                || trial.spell.equals("goety:fire_breath_focus") || trial.spell.equals("goety:water_jet_focus")) {
+                passed &= trial.maxPulsesInCast >= 3;
+                CNPCMagic.LOGGER.info("VERIFY {} continuous damage {} maxPulsesInOneCast={} damageTypes={}",
+                    passed ? "PASS" : "FAIL", trial.spell, trial.maxPulsesInCast, trial.damageTypes);
             }
-            boolean passed = trial.starts >= 3 && trial.completed >= 3 && damage > 0;
             if (trial.spell.equals("irons_spellbooks:acupuncture")) {
                 passed = trial.starts >= 1 && trial.completed >= 1 && trial.levelsMatch
-                    && trial.observedLevel == 100 && damage > 0;
+                    && trial.observedLevel == 100 && trial.nativeDamage > 0;
             }
-            CNPCMagic.LOGGER.info("VERIFY {} {} starts={} completed={} damage={} providers={}",
+            if (trial.spell.equals("goety:steaming_focus")) {
+                passed &= trial.completed >= 3 && trial.projectiles >= trial.completed * 5;
+                CNPCMagic.LOGGER.info("VERIFY {} Goety finite charged volleys casts={} steamMissiles={} minimum={}",
+                    passed ? "PASS" : "FAIL", trial.completed, trial.projectiles, trial.completed * 5);
+            }
+            CNPCMagic.LOGGER.info("VERIFY {} {} starts={} completed={} damage={} nativeDamage={} casterUuidFakePlayerDamage={} providers={} otherDamageTypes={}",
                 passed ? "PASS" : "FAIL", trial.spell,
-                trial.starts, trial.completed, damage, trial.providers);
+                trial.starts, trial.completed, damage, trial.nativeDamage, trial.fakePlayerDamage, trial.providers, trial.otherDamageTypes);
         }
         boolean counters = FIRST.size() >= 6 && SECOND.size() >= 3;
         for (int i = 2; i < FIRST.size(); i += 2) {
@@ -298,7 +415,13 @@ public final class MagicVerification {
         }
         CNPCMagic.LOGGER.info("VERIFY {} scheduler duplicate entries first={} second={}",
             counters ? "PASS" : "FAIL", FIRST, SECOND);
+        var async = top.cnpcmagic.server.CombatDecisions.stats();
+        boolean combatParity = asyncPhase == 3 && decisionChecks > 0 && orderChecks > 0 && async.batches() > 0
+            && async.reusedConditions() > asyncReused && async.reusedOrders() > 0 && async.workersOffThread();
+        CNPCMagic.LOGGER.info("VERIFY {} combat/source same-tick parity decisions={} orders={} async={}",
+            combatParity ? "PASS" : "FAIL", decisionChecks, orderChecks, async);
         CNPCMagic.LOGGER.info("VERIFY COMPLETE; fixtures retained for visual checks");
+        if (Boolean.getBoolean("cnpcmagic.verify.exit")) event.getServer().halt(false);
     }
 
     private static final class Trial {
@@ -308,11 +431,20 @@ public final class MagicVerification {
         private final int expectedLevel;
         private final net.minecraft.world.phys.Vec3 anchor;
         private int starts;
+        private int rejectedStarts;
         private int completed;
         private int observedLevel;
         private boolean levelsMatch = true;
         private boolean mixed;
         private int echoes;
+        private int projectiles;
+        private float nativeDamage;
+        private float fakePlayerDamage;
+        private boolean casting;
+        private long lastPulseTick = -1;
+        private int pulsesInCast, maxPulsesInCast;
+        private final java.util.Set<String> damageTypes = new java.util.HashSet<>();
+        private final java.util.Set<String> otherDamageTypes = new java.util.HashSet<>();
         private final List<String> startOrder = new ArrayList<>();
         private final java.util.Set<String> providers = new java.util.HashSet<>();
 
@@ -331,11 +463,22 @@ public final class MagicVerification {
         public int getMaxLevel(String spell) { return delegate.getMaxLevel(spell); }
         public boolean requiresMeleeTarget(String spell) { return delegate.requiresMeleeTarget(spell); }
         public MagicCast startCast(LivingEntity caster, String spell, int level, LivingEntity target) {
-            MagicCast cast = delegate.startCast(caster, spell, level, target);
-            if (cast == null) return null;
             Trial trial = TRIALS.stream().filter(t -> t.npc == caster).findFirst().orElse(null);
+            MagicCast cast = delegate.startCast(caster, spell, level, target);
+            if (cast == null) {
+                if (trial != null && spell.equals("irons_spellbooks:chain_lightning") && trial.rejectedStarts++ % 10 == 0) {
+                    var hit = io.redspace.ironsspellbooks.api.util.RaycastBuilder.begin(caster.level(), caster)
+                        .range(32).checkForBlocks(true).bbInflation(0.35f).build();
+                    CNPCMagic.LOGGER.info("VERIFY chain rejected={} caster={} target={} look={} hit={} victim={}",
+                        trial.rejectedStarts, caster.position(), target.position(), caster.getLookAngle(), hit.getType(),
+                        hit instanceof net.minecraft.world.phys.EntityHitResult entityHit ? entityHit.getEntity().getType() : hit.getLocation());
+                }
+                return null;
+            }
             if (trial == null) return cast;
             trial.starts++;
+            trial.pulsesInCast = 0;
+            trial.casting = true;
             trial.observedLevel = level;
             trial.levelsMatch &= level == trial.expectedLevel;
             trial.providers.add(getId());
@@ -344,10 +487,11 @@ public final class MagicVerification {
                 public boolean tick(LivingEntity mob, LivingEntity victim) {
                     boolean done = cast.tick(mob, victim);
                     if (done && cast.wasSuccessful()) trial.completed++;
+                    if (done) trial.casting = false;
                     return done;
                 }
                 public boolean wasSuccessful() { return cast.wasSuccessful(); }
-                public void cancel(LivingEntity mob) { cast.cancel(mob); }
+                public void cancel(LivingEntity mob) { trial.casting = false; cast.cancel(mob); }
             };
         }
     }

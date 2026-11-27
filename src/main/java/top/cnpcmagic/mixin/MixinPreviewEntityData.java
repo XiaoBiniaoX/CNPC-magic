@@ -9,10 +9,10 @@ import java.util.List;
 /** Snapshot without consuming the dirty flags used by normal entity tracking. */
 @Mixin(SynchedEntityData.class)
 public abstract class MixinPreviewEntityData implements MagicPreview.EntityData {
-    @Shadow @Final private Int2ObjectMap<SynchedEntityData.DataItem<?>> itemsById;
+    @Shadow @Final private SynchedEntityData.DataItem<?>[] itemsById;
     @Override public List<SynchedEntityData.DataValue<?>> cnpcmagic$values() {
         List<SynchedEntityData.DataValue<?>> values = new java.util.ArrayList<>();
-        for (var item : itemsById.values()) values.add(item.value());
+        for (var item : itemsById) if (item != null) values.add(item.value());
         return values;
     }
 }

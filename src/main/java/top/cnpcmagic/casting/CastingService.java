@@ -2,11 +2,11 @@ package top.cnpcmagic.casting;
 
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.LivingEntity;
-import net.minecraftforge.common.MinecraftForge;
-import net.minecraftforge.event.server.ServerStoppedEvent;
-import net.minecraftforge.event.server.ServerStoppingEvent;
-import net.minecraftforge.event.entity.EntityLeaveLevelEvent;
-import net.minecraftforge.eventbus.api.SubscribeEvent;
+import net.neoforged.neoforge.common.NeoForge;
+import net.neoforged.neoforge.event.server.ServerStoppedEvent;
+import net.neoforged.neoforge.event.server.ServerStoppingEvent;
+import net.neoforged.neoforge.event.entity.EntityLeaveLevelEvent;
+import net.neoforged.bus.api.SubscribeEvent;
 import top.cnpcmagic.CNPCMagic;
 import top.cnpcmagic.provider.MagicCast;
 import top.cnpcmagic.provider.MagicProvider;
@@ -116,12 +116,12 @@ public final class CastingService {
     public static boolean before(Context context, String phase) { return dispatch(new SpellEvent.Before(context, phase)); }
     public static void notify(Context context, String phase, SpellResult result) { dispatch(new SpellEvent(context, phase, result)); }
     private static boolean dispatch(SpellEvent event) {
-        boolean cancelled = MinecraftForge.EVENT_BUS.post(event);
+        NeoForge.EVENT_BUS.post(event);
         // CNPC Forge scripts can declare function spellCast(event), spellImpact(event), etc.
         var controller = noppes.npcs.controllers.ScriptController.Instance;
         if (controller != null && controller.forgeScripts.isEnabled())
             for (var script : controller.forgeScripts.getScripts()) script.run(event.phase, event);
-        return cancelled || event.isCancelable() && event.isCanceled();
+        return event instanceof net.neoforged.bus.api.ICancellableEvent cancellable && cancellable.isCanceled();
     }
     public static final class Session implements MagicCast {
         public final Context context;

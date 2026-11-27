@@ -6,17 +6,21 @@ import com.Polarice3.Goety.api.magic.IBlockSpell;
 import com.Polarice3.Goety.api.magic.IChargingSpell;
 import com.Polarice3.Goety.api.magic.ISpell;
 import com.Polarice3.Goety.api.magic.ITouchSpell;
-import com.Polarice3.Goety.common.enchantments.ModEnchantments;
+import com.Polarice3.Goety.api.items.magic.IWand;
 import com.Polarice3.Goety.common.items.ModItems;
+import com.Polarice3.Goety.common.enchantments.ModEnchantments;
+import com.Polarice3.Goety.common.items.magic.DarkWand;
 import com.Polarice3.Goety.common.magic.SpellStat;
+import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.sounds.SoundEvent;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.item.ItemStack;
-import net.minecraftforge.common.capabilities.ForgeCapabilities;
-import net.minecraftforge.items.IItemHandlerModifiable;
+import net.minecraft.world.item.component.CustomData;
+import net.neoforged.neoforge.capabilities.Capabilities;
+import net.neoforged.neoforge.items.IItemHandlerModifiable;
 import top.cnpcmagic.provider.MagicCast;
 import top.cnpcmagic.server.NpcAnimationSync;
 
@@ -54,17 +58,18 @@ public final class GoetyAdapter {
 
     public static int getMaxLevel(String id) {
         ISpell spell = getSpell(id);
-        return spell != null && spell.acceptedEnchantments().contains(ModEnchantments.POTENCY.get())
-            ? ModEnchantments.POTENCY.get().getMaxLevel() + 1 : 1;
+        if (spell == null || !spell.acceptedEnchantments().contains(ModEnchantments.POTENCY)) return 1;
+        var server = net.neoforged.neoforge.server.ServerLifecycleHooks.getCurrentServer();
+        // Goety's shipped datapack defines potency max_level=3; the server uses its active registry.
+        return server == null ? 4 : server.registryAccess()
+            .registryOrThrow(net.minecraft.core.registries.Registries.ENCHANTMENT)
+            .getHolderOrThrow(ModEnchantments.POTENCY).value().getMaxLevel() + 1;
     }
 
     public static ItemStack makeStaff(String id) {
         ItemStack staff = new ItemStack(ModItems.DARK_WAND.get());
-        staff.getCapability(ForgeCapabilities.ITEM_HANDLER).ifPresent(handler -> {
-            if (handler instanceof IItemHandlerModifiable inventory) {
-                inventory.setStackInSlot(0, new ItemStack(BuiltInRegistries.ITEM.get(new ResourceLocation(id))));
-            }
-        });
+        if (staff.getCapability(Capabilities.ItemHandler.ITEM) instanceof IItemHandlerModifiable inventory)
+            inventory.setStackInSlot(0, new ItemStack(BuiltInRegistries.ITEM.get(ResourceLocation.parse(id))));
         return staff;
     }
 
@@ -82,19 +87,20 @@ public final class GoetyAdapter {
         }
         ItemStack staff = makeStaff(id);
         SpellStat stats = spell.defaultStats().increasePotency(Math.max(0, level - 1));
-        if (!spell.conditionsMet(world, caster) || !spell.conditionsMet(world, caster, stats)) {
-            return null;
-        }
-        if (spell instanceof ITouchSpell touch && !touch.targetConditions(world, caster, target, staff, stats)) {
-            return null;
-        }
         Session session = new Session(spell, staff, stats, id);
         try {
             session.initialize(caster);
+            if (!spell.conditionsMet(world, caster) || !spell.conditionsMet(world, caster, stats)) {
+                return null;
+            }
+            if (spell instanceof ITouchSpell touch && !touch.targetConditions(world, caster, target, staff, stats)) {
+                return null;
+            }
             spell.startSpell(world, caster, staff, stats);
             SoundEvent sound = spell.CastingSound(caster, staff);
             if (sound != null) {
-                spell.playSound(world, caster, sound, spell.castingVolume(), spell.castingPitch());
+                world.playSound(null, caster.getX(), caster.getY(), caster.getZ(), sound,
+                    net.minecraft.sounds.SoundSource.HOSTILE, spell.castingVolume(), spell.castingPitch());
             }
             NpcAnimationSync.play(caster, id, Math.max(10, session.duration));
             return session;
@@ -107,40 +113,50 @@ public final class GoetyAdapter {
     private static final class Session implements MagicCast {
         private final ISpell spell;
         private final ItemStack staff;
+        private final DarkWand wand;
         private final SpellStat stats;
-        private final ItemStack focus;
         private final String animation;
         private int duration;
         private int elapsed;
         private int chargeUp;
-        private int interval;
-        private int shots;
-        private int shotLimit;
-        private int sinceShot;
         private boolean successful;
         private boolean finished;
 
         private Session(ISpell spell, ItemStack staff, SpellStat stats, String id) {
             this.spell = spell;
             this.staff = staff;
+            wand = (DarkWand)staff.getItem();
             this.stats = stats;
             animation = id;
-            focus = new ItemStack(BuiltInRegistries.ITEM.get(new ResourceLocation(id)));
         }
 
         private void initialize(LivingEntity caster) {
+            CustomData.update(DataComponents.CUSTOM_DATA, staff, tag -> {
+                tag.putInt(IWand.SOULCOST, 0);
+                tag.putInt(IWand.DURATION, 0);
+                tag.putInt(IWand.COOLDOWN, 0);
+                tag.putInt(IWand.COOL, 0);
+                tag.putInt(IWand.SHOTS, 0);
+                tag.putInt(IWand.SECONDS, 0);
+                tag.putInt(IWand.SOULUSE, 0);
+                tag.putInt(IWand.CASTTIME, 0);
+            });
+            refreshStaffConditions(caster);
             if (spell instanceof IChargingSpell charging) {
                 chargeUp = Math.max(0, charging.castUp(caster, staff));
-                interval = Math.max(1, charging.Cooldown(caster, staff, 0));
-                shotLimit = charging.shotsNumber(caster, staff);
-                // ponytail: unbounded player channels get a finite 5-second NPC round; add a duration field if needed.
-                if (shotLimit <= 0) {
-                    shotLimit = Math.max(1, 100 / interval);
-                }
-                duration = chargeUp + interval * shotLimit;
+                int shotLimit = charging.shotsNumber(caster, staff);
+                duration = shotLimit > 0 ? chargeUp + Math.max(1, wand.Cooldown(staff)) * shotLimit : chargeUp + 100;
             } else {
                 duration = Math.max(1, spell.castDuration(caster, staff));
             }
+        }
+
+        private void refreshStaffConditions(LivingEntity caster) {
+            wand.setSpellConditions(spell, staff, caster);
+            CustomData.update(DataComponents.CUSTOM_DATA, staff, tag -> {
+                tag.putInt(IWand.SOULUSE, wand.SoulUse(caster, staff));
+                tag.putInt(IWand.CASTTIME, wand.CastDuration(staff));
+            });
         }
 
         @Override
@@ -149,6 +165,7 @@ public final class GoetyAdapter {
                 return true;
             }
             ServerLevel world = (ServerLevel) caster.level();
+            refreshStaffConditions(caster);
             if (!spell.conditionsMet(world, caster) || !spell.conditionsMet(world, caster, stats)) {
                 cancel(caster);
                 return true;
@@ -161,20 +178,33 @@ public final class GoetyAdapter {
             spell.useSpell(world, caster, staff, elapsed, stats);
             spell.useParticle(world, caster, staff);
             if (elapsed % 20 == 0 && spell.loopSound(caster) != null) {
-                spell.playSound(world, caster, spell.loopSound(caster));
+                world.playSound(null, caster.getX(), caster.getY(), caster.getZ(), spell.loopSound(caster),
+                    net.minecraft.sounds.SoundSource.HOSTILE, 1, 1);
             }
             if (spell instanceof IChargingSpell charging) {
-                if (elapsed >= chargeUp && ++sinceShot >= interval) {
-                    sinceShot = 0;
-                    if (spell instanceof IBreathingSpell breathing) {
-                        breathing.showWandBreath(caster, staff, stats);
+                int currentChargeUp = Math.max(0, charging.castUp(caster, staff));
+                if (elapsed >= currentChargeUp || currentChargeUp <= 0) {
+                    CustomData.update(DataComponents.CUSTOM_DATA, staff,
+                        tag -> tag.putInt(IWand.COOL, tag.getInt(IWand.COOL) + 1));
+                    int cool = staff.getOrDefault(DataComponents.CUSTOM_DATA, CustomData.EMPTY).copyTag().getInt(IWand.COOL);
+                    if (cool >= wand.Cooldown(staff)) {
+                        CustomData.update(DataComponents.CUSTOM_DATA, staff, tag -> tag.putInt(IWand.COOL, 0));
+                        int shotLimit = charging.shotsNumber(caster, staff);
+                        if (shotLimit > 0) wand.increaseShots(staff);
+
+                        if (spell instanceof IBreathingSpell breathing) {
+                            breathing.showWandBreath(caster, staff, stats);
+                        }
+                        spell.SpellResult(world, caster, staff, stats);
+                        successful = true;
+                        int currentShotLimit = charging.shotsNumber(caster, staff);
+                        if (currentShotLimit > 0 && wand.ShotsFired(staff) >= currentShotLimit) {
+                            complete(caster);
+                            return true;
+                        }
                     }
-                    spell.SpellResult(world, caster, staff, stats);
-                    successful = true;
-                    shots++;
-                    interval = Math.max(1, charging.Cooldown(caster, staff, shots));
                 }
-                if (shots >= shotLimit) {
+                if (charging.shotsNumber(caster, staff) <= 0 && elapsed >= chargeUp + 100) {
                     complete(caster);
                     return true;
                 }
@@ -206,7 +236,7 @@ public final class GoetyAdapter {
             if (!finished) {
                 finished = true;
                 try {
-                    spell.stopSpell((ServerLevel) caster.level(), caster, staff, focus, elapsed, stats);
+                    spell.stopSpell((ServerLevel) caster.level(), caster, staff, IWand.getFocus(staff), elapsed, stats);
                 } finally {
                     if (successful) {
                         // Instant Goety spells have zero cast time: retain a visible follow-through, not a one-tick flicker.

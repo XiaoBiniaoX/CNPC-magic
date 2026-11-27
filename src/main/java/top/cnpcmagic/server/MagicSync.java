@@ -13,7 +13,7 @@ import top.cnpcmagic.casting.SpellDefinition;
 import top.cnpcmagic.casting.SpellLibrary;
 import top.cnpcmagic.network.NetworkHandler;
 import top.cnpcmagic.network.S2CMagicEditor;
-import net.minecraftforge.network.PacketDistributor;
+import net.neoforged.neoforge.network.PacketDistributor;
 
 import java.util.HashMap;
 import java.util.List;
@@ -63,7 +63,7 @@ public final class MagicSync {
                 for (var type : List.of(top.cnpcmagic.data.RuleConditions.Type.CASTER_EFFECT, top.cnpcmagic.data.RuleConditions.Type.TARGET_EFFECT)) {
                     if (!rule.conditions.enabled.contains(type)) continue;
                     String id = type == top.cnpcmagic.data.RuleConditions.Type.CASTER_EFFECT ? rule.conditions.casterEffect : rule.conditions.targetEffect;
-                    if (!net.minecraftforge.registries.ForgeRegistries.MOB_EFFECTS.containsKey(new net.minecraft.resources.ResourceLocation(id))) { error(player, "Unknown condition effect: " + id); return; }
+                    if (!net.minecraft.core.registries.BuiltInRegistries.MOB_EFFECT.containsKey(net.minecraft.resources.ResourceLocation.parse(id))) { error(player, "Unknown condition effect: " + id); return; }
                 }
             }
             if (provider.getId().equals("cnpcmagic")) for (MagicRule rule : rules) {
@@ -80,18 +80,23 @@ public final class MagicSync {
         ack.put("providers", accepted); send(player, ack);
     }
 
-    public static void send(ServerPlayer player, CompoundTag data) { NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), new S2CMagicEditor(data)); }
+    public static void send(ServerPlayer player, CompoundTag data) { PacketDistributor.sendToPlayer(player, new S2CMagicEditor(data)); }
     public static void error(ServerPlayer player, String message) { CompoundTag t = new CompoundTag(); t.putString("action", "error"); t.putString("message", message); send(player, t); }
     public static boolean canEdit(ServerPlayer player) { return NoppesUtilServer.getEditingNpc(player) != null && CustomNpcsPermissions.hasPermission(player, CustomNpcsPermissions.NPC_GUI); }
     public static void saveDefinition(ServerPlayer player, CompoundTag packet) {
         if (!canEdit(player)) { error(player, "No permission to edit spells"); return; }
+        top.cnpcmagic.api.MagicApi.decodeDefinitionAsync(packet.getCompound("definition")).whenCompleteAsync((definition, failure) -> {
+        if (player.hasDisconnected()) return;
+        if (failure != null) {
+            Throwable cause = failure instanceof java.util.concurrent.CompletionException ? failure.getCause() : failure;
+            error(player, cause.getMessage()); return;
+        }
         try {
-            SpellDefinition definition = SpellDefinition.load(packet.getCompound("definition"));
             for (var e : definition.effects) {
                 var key = net.minecraft.resources.ResourceLocation.tryParse(e.id);
-                if (e.type == SpellDefinition.EffectType.STATUS && !net.minecraftforge.registries.ForgeRegistries.MOB_EFFECTS.containsKey(key)
-                    || e.type == SpellDefinition.EffectType.SUMMON && !net.minecraftforge.registries.ForgeRegistries.ENTITY_TYPES.containsKey(key)
-                    || e.type == SpellDefinition.EffectType.AUDIO && !net.minecraftforge.registries.ForgeRegistries.SOUND_EVENTS.containsKey(key))
+                if (e.type == SpellDefinition.EffectType.STATUS && !net.minecraft.core.registries.BuiltInRegistries.MOB_EFFECT.containsKey(key)
+                    || e.type == SpellDefinition.EffectType.SUMMON && !net.minecraft.core.registries.BuiltInRegistries.ENTITY_TYPE.containsKey(key)
+                    || e.type == SpellDefinition.EffectType.AUDIO && !net.minecraft.core.registries.BuiltInRegistries.SOUND_EVENT.containsKey(key))
                     throw new IllegalArgumentException("Unknown effect registry ID: " + e.id);
             }
             SpellLibrary library = SpellLibrary.get(player.server);
@@ -104,6 +109,7 @@ public final class MagicSync {
             }
             CompoundTag ack = new CompoundTag(); ack.putString("action", "definitionSaved"); ack.put("definition", definition.save()); send(player, ack);
         } catch (IllegalArgumentException | IllegalStateException e) { error(player, e.getMessage()); }
+        }, player.server);
     }
     public static void deleteDefinition(ServerPlayer player, String id) {
         if (!canEdit(player)) { error(player, "No permission to edit spells"); return; }

@@ -53,6 +53,8 @@
   "cnpcmagic.editor.continue": "继续编辑",
   "cnpcmagic.editor.invalidNumbers": "请检查等级、次数、冷却和距离的有效范围。",
   "cnpcmagic.editor.search": "搜索法术名称或 ID",
+  "cnpcmagic.editor.allSchools": "全部学派",
+  "cnpcmagic.editor.schoolFilter": "学派：%s（点击选择）",
   "cnpcmagic.editor.previewHint": "使用当前 NPC 试放",
   "cnpcmagic.editor.target": "目标",
   "cnpcmagic.editor.entity": "实体",

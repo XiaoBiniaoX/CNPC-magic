@@ -16,6 +16,8 @@ public abstract class MixinIronCastData {
         at = @At("HEAD"), cancellable = true, remap = false)
     private static void cnpcmagic$sessionData(LivingEntity caster, CallbackInfoReturnable<Object> cir) {
         Object data = IronAdapter.getCastData(caster);
+        if (data == null && caster.level().isClientSide && caster instanceof noppes.npcs.entity.EntityNPCInterface
+            && caster instanceof io.redspace.ironsspellbooks.api.entity.IMagicEntity magic) data = magic.getMagicData();
         if (data != null) cir.setReturnValue(data);
     }
 }

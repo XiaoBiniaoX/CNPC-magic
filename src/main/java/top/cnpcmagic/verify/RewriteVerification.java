@@ -7,14 +7,13 @@ import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.level.block.Blocks;
-import net.minecraftforge.event.TickEvent;
-import net.minecraftforge.event.server.ServerStartedEvent;
-import net.minecraftforge.eventbus.api.SubscribeEvent;
-import net.minecraftforge.fml.ModList;
+import net.neoforged.neoforge.event.tick.*;
+import net.neoforged.neoforge.event.server.ServerStartedEvent;
+import net.neoforged.bus.api.SubscribeEvent;
+import net.neoforged.fml.ModList;
 import noppes.npcs.CustomEntities;
 import noppes.npcs.CustomNpcs;
 import noppes.npcs.api.NpcAPI;
-import noppes.npcs.controllers.Jsr223Executor;
 import noppes.npcs.controllers.ScriptContainer;
 import noppes.npcs.controllers.ScriptController;
 import noppes.npcs.entity.EntityNPCInterface;
@@ -33,6 +32,7 @@ public final class RewriteVerification {
     private static ServerLevel world;
     private static int ticks;
     private static boolean reported;
+    private static java.util.concurrent.CompletableFuture<SpellDefinition> asyncDefinition;
 
     private static void check(boolean value, String message) {
         if (!value) throw new IllegalStateException(message);
@@ -42,15 +42,20 @@ public final class RewriteVerification {
         try {
             world = event.getServer().overworld(); ticks = 0; reported = false; TRIALS.clear();
             check(event.getServer().getLevel(top.cnpcmagic.server.MagicPreview.DIMENSION) != null, "preview dimension registered");
-            for (String id : List.of("irons_spellbooks", "goety", "ebwizardry", "ars_nouveau"))
+            for (String id : List.of("irons_spellbooks", "goety", "ars_nouveau"))
                 check((MagicProviders.get(id) != null) == ModList.get().isLoaded(id), "optional provider " + id);
             PersistenceVerification.run(event.getServer(), Boolean.getBoolean("cnpcmagic.verify.reload"));
             SpellLibrary library = SpellLibrary.get(event.getServer());
+            CompoundTag detached = library.spells.get("cnpcmagic:magic_ray").save();
+            asyncDefinition = top.cnpcmagic.api.MagicApi.decodeDefinitionAsync(detached);
+            detached.putString("id", "invalid:changed_after_submit");
             if (Boolean.getBoolean("cnpcmagic.verify.reload")) {
                 check(library.spells.containsKey("cnpcmagic:verify_instant"), "custom definition survives restart");
                 check(library.spells.size() >= 16, "builtins and custom definitions retained");
                 CNPCMagic.LOGGER.info("REWRITE PASS reload: custom library and preview dimension; providers={}", MagicProviders.all().stream().map(p -> p.getId()).toList());
-                reported = true; return;
+                reported = true;
+                if (Boolean.getBoolean("cnpcmagic.verify.exit")) event.getServer().halt(false);
+                return;
             }
             for (int x = -1; x <= 4; x++) for (int z = -1; z <= 1; z++) world.setChunkForced(x, z, true);
             for (int x = -2; x <= 62; x++) for (int z = -2; z <= 5; z++) world.setBlock(new BlockPos(x, 79, z), Blocks.STONE.defaultBlockState(), 3);
@@ -94,31 +99,36 @@ public final class RewriteVerification {
             CustomNpcs.EnableScripting = true; ScriptController.HasStart = true;
             try {
                 var scriptVetoed = CastingService.start(caster, "cnpcmagic:magic_ray", 1, SpellTarget.none(), "verify_script_veto");
-                check(!script.isErrored() && scriptVetoed.result().code().equals("CANCELLED"), "CNPC Forge script veto is synchronous");
+                check(!script.errored && scriptVetoed.result().code().equals("CANCELLED"), "CNPC Forge script veto is synchronous");
             } finally {
                 forgeScripts.getScripts().remove(script); forgeScripts.setEnabled(enabled); forgeScripts.setLanguage(language);
                 CustomNpcs.EnableScripting = scripting; ScriptController.HasStart = started;
             }
-            Jsr223Executor executor = new Jsr223Executor();
+            CnpcScriptExecutor executor = new CnpcScriptExecutor();
             try {
                 executor.initialize("ECMAScript", Map.of("npc", NpcAPI.Instance().getIEntity(caster)));
                 executor.setScript("function verify(event) { var r=npc.castSpellResult('missing:spell',1,npc); if(r.getCode()!='ADAPTER_UNAVAILABLE') throw 'result getter'; if(npc.findSpells('verify_instant').length!=1) throw 'query'; }");
                 String output = executor.run("verify", null); check(!executor.isErrored(), "direct script structured result/query: " + output);
             } finally { executor.close(); }
             CNPCMagic.LOGGER.info("REWRITE PASS validation, cooldown, cancel, synchronous Forge/CNPC-script veto, direct ECMAScript; providers={}", MagicProviders.all().stream().map(p -> p.getId()).toList());
-        } catch (RuntimeException | LinkageError error) { reported = true; CNPCMagic.LOGGER.error("REWRITE FAIL setup", error); }
+        } catch (RuntimeException | LinkageError error) {
+            reported = true; CNPCMagic.LOGGER.error("REWRITE FAIL setup", error);
+            if (Boolean.getBoolean("cnpcmagic.verify.exit")) event.getServer().halt(false);
+        }
     }
 
     @SubscribeEvent public static void veto(SpellEvent.Before event) {
         if (event.context.source().equals("verify_veto") && event.phase.equals("spellPreCast")) event.setCanceled(true);
     }
 
-    @SubscribeEvent public static void tick(TickEvent.ServerTickEvent event) {
-        if (event.phase != TickEvent.Phase.END || reported || caster == null) return;
+    @SubscribeEvent public static void tick(ServerTickEvent.Post event) {
+        if (reported || caster == null) return;
         try {
             ticks++;
             for (Trial trial : TRIALS) if (!trial.done) trial.done = trial.attempt.cast().tick(caster, trial.target);
             if (ticks < 100) return;
+            PersistenceVerification.verifyDiscardCleanup(event.getServer());
+            check(asyncDefinition.isDone() && asyncDefinition.join().id.equals("cnpcmagic:magic_ray"), "async definition validation owns its detached snapshot");
             for (Trial trial : TRIALS) {
                 check(trial.done && trial.attempt.cast().wasSuccessful(), "delivery completes " + trial.definition.delivery);
                 check(CastingService.result(trial.attempt.result().getInstanceId()).state().equals("COMPLETED"), "retained terminal result " + trial.definition.delivery);
@@ -130,7 +140,11 @@ public final class RewriteVerification {
             check(!caster.saveWithoutId(new CompoundTag()).toString().contains("verify_instant"), "definitions outside NPC NBT");
             reported = true; CNPCMagic.LOGGER.info("REWRITE PASS eight deliveries: actual damage, terminal states, projectile/summon expiry and NBT isolation");
             CNPCMagic.LOGGER.info("REWRITE COMPLETE");
-        } catch (RuntimeException | LinkageError error) { reported = true; CNPCMagic.LOGGER.error("REWRITE FAIL tick", error); }
+            if (Boolean.getBoolean("cnpcmagic.verify.exit")) event.getServer().halt(false);
+        } catch (RuntimeException | LinkageError error) {
+            reported = true; CNPCMagic.LOGGER.error("REWRITE FAIL tick", error);
+            if (Boolean.getBoolean("cnpcmagic.verify.exit")) event.getServer().halt(false);
+        }
     }
 
     private static final class Trial {

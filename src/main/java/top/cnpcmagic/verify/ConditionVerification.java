@@ -6,7 +6,7 @@ import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
-import net.minecraftforge.event.entity.living.LivingEvent;
+import net.neoforged.neoforge.event.tick.EntityTickEvent;
 import noppes.npcs.CustomEntities;
 import top.cnpcmagic.casting.CastingService;
 import top.cnpcmagic.casting.SpellTarget;
@@ -17,7 +17,24 @@ import java.util.List;
 
 final class ConditionVerification {
     private static void check(boolean value, String message) { if (!value) throw new IllegalStateException(message); }
+    static void snapshots(ServerLevel world) {
+        var caster = CustomEntities.entityCustomNpc.create(world); var target = EntityType.HUSK.create(world);
+        caster.moveTo(0, 90, 0, 0, 0); target.moveTo(8, 90, 0, 0, 0);
+        target.addEffect(new MobEffectInstance(MobEffects.WITHER, 100));
+        RuleConditions conditions = new RuleConditions();
+        conditions.casterEffect = "minecraft:wither"; conditions.targetEffect = "minecraft:wither";
+        conditions.previousSpell = "missing:spell";
+        int checks = 0;
+        for (int mask = 0; mask < 128; mask++) for (boolean any : List.of(false, true)) for (int range : List.of(1, 8, 64)) {
+            conditions.enabled.clear(); conditions.any = any;
+            for (var type : RuleConditions.Type.values()) if ((mask & 1 << type.ordinal()) != 0) conditions.enabled.add(type);
+            check(conditions.snapshot(caster, target, range).test() == conditions.test(caster, target, range), "snapshot/source condition parity " + mask + "/" + any + "/" + range);
+            checks++;
+        }
+        top.cnpcmagic.CNPCMagic.LOGGER.info("VERIFY PASS combat immutable snapshot/source parity {} cases", checks);
+    }
     static void run(ServerLevel world) {
+        snapshots(world);
         int[] starts = {0};
         MagicProviders.register(new MagicProvider() {
             public String getId() { return "condition_probe"; }
@@ -83,30 +100,30 @@ final class ConditionVerification {
             MagicRule gate = new MagicRule(); gate.enabled = true; gate.independent = independent; gate.spellId = "condition_probe:followup"; gate.range = 1;
             gate.conditions.enabled.clear(); gate.conditions.targetHealth = 0;
             MagicDataStore.get(world.getServer()).setRules(npc.getUUID(), "condition_probe", List.of(gate));
-            int before = starts[0]; MagicCombatHandler.onLivingTick(new LivingEvent.LivingTickEvent(npc));
+            int before = starts[0]; MagicCombatHandler.onLivingTick(new EntityTickEvent.Post(npc));
             check(starts[0] == before + 1, "scheduler ignores disabled gates " + independent);
             MagicCombatHandler.reset(npc);
             gate.conditions.enabled.add(RuleConditions.Type.TARGET_HEALTH);
-            MagicCombatHandler.onLivingTick(new LivingEvent.LivingTickEvent(npc));
+            MagicCombatHandler.onLivingTick(new EntityTickEvent.Post(npc));
             check(starts[0] == before + 1, "scheduler enforces enabled gate " + independent);
             MagicCombatHandler.reset(npc);
             gate.conditions.enabled.clear(); gate.conditions.enabled.add(RuleConditions.Type.PREVIOUS_SPELL);
             gate.conditions.previousSpell = "condition_probe:alpha";
             var predecessor = CastingService.start(npc, gate.conditions.previousSpell, 1, SpellTarget.entity(target), "condition_verification");
             check(predecessor.cast() != null && predecessor.cast().tick(npc, target), "scheduler predecessor completed " + independent);
-            before = starts[0]; MagicCombatHandler.onLivingTick(new LivingEvent.LivingTickEvent(npc));
+            before = starts[0]; MagicCombatHandler.onLivingTick(new EntityTickEvent.Post(npc));
             check(starts[0] == before + 1, "scheduler starts combo with unrelated gates off " + independent);
             MagicCombatHandler.reset(npc);
             gate.conditions.previousSpell = "condition_probe:other";
-            MagicCombatHandler.onLivingTick(new LivingEvent.LivingTickEvent(npc));
+            MagicCombatHandler.onLivingTick(new EntityTickEvent.Post(npc));
             check(starts[0] == before + 1, "scheduler rejects wrong predecessor " + independent);
             MagicCombatHandler.reset(npc);
             gate.conditions.previousSpell = "condition_probe:alpha"; gate.conditions.enabled.add(RuleConditions.Type.TARGET_HEALTH);
-            MagicCombatHandler.onLivingTick(new LivingEvent.LivingTickEvent(npc));
+            MagicCombatHandler.onLivingTick(new EntityTickEvent.Post(npc));
             check(starts[0] == before + 1, "scheduler ALL enforces enabled health with combo " + independent);
             MagicCombatHandler.reset(npc);
             gate.conditions.any = true;
-            MagicCombatHandler.onLivingTick(new LivingEvent.LivingTickEvent(npc));
+            MagicCombatHandler.onLivingTick(new EntityTickEvent.Post(npc));
             check(starts[0] == before + 2, "scheduler ANY accepts combo despite failing enabled health " + independent);
             MagicCombatHandler.reset(npc);
         }

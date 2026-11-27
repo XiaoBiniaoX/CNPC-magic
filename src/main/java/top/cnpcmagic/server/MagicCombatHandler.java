@@ -2,11 +2,11 @@ package top.cnpcmagic.server;
 
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Mob;
-import net.minecraftforge.event.entity.living.LivingEvent;
-import net.minecraftforge.event.entity.EntityLeaveLevelEvent;
-import net.minecraftforge.event.server.ServerStoppedEvent;
-import net.minecraftforge.event.server.ServerStoppingEvent;
-import net.minecraftforge.eventbus.api.SubscribeEvent;
+import net.neoforged.neoforge.event.tick.EntityTickEvent;
+import net.neoforged.neoforge.event.entity.EntityLeaveLevelEvent;
+import net.neoforged.neoforge.event.server.ServerStoppedEvent;
+import net.neoforged.neoforge.event.server.ServerStoppingEvent;
+import net.neoforged.bus.api.SubscribeEvent;
 import noppes.npcs.entity.EntityNPCInterface;
 import top.cnpcmagic.CNPCMagic;
 import top.cnpcmagic.data.MagicDataStore;
@@ -16,7 +16,6 @@ import top.cnpcmagic.provider.MagicProviders;
 import top.cnpcmagic.provider.MagicCast;
 
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
 import java.util.HashMap;
 import java.util.IdentityHashMap;
@@ -30,11 +29,14 @@ public final class MagicCombatHandler {
     }
 
     @SubscribeEvent
-    public static void onLivingTick(LivingEvent.LivingTickEvent event) {
+    public static void onLivingTick(EntityTickEvent.Post event) {
         if (!(event.getEntity() instanceof EntityNPCInterface npc) || npc.level().isClientSide()) {
             return;
         }
-        if (ScriptMagic.isCasting(npc) || MagicPreview.isPreview(npc)) return;
+        if (ScriptMagic.isCasting(npc) || MagicPreview.isPreview(npc)) {
+            CombatDecisions.remove(npc.getUUID());
+            return;
+        }
         if (!npc.isAlive()) {
             reset(npc);
             return;
@@ -43,6 +45,7 @@ public final class MagicCombatHandler {
         NpcState state = STATES.get(npc.getUUID());
         if (target == null || !target.isAlive() || target.level() != npc.level()) {
             if (state != null) cancelAll(npc, state);
+            CombatDecisions.remove(npc.getUUID());
             return;
         }
         if (state == null) {
@@ -54,10 +57,13 @@ public final class MagicCombatHandler {
         MagicDataStore store = MagicDataStore.get(npc.level().getServer());
         List<Entry> entries = new ArrayList<>();
         for (MagicProvider provider : MagicProviders.all()) {
-            for (MagicRule rule : store.getRules(npc, provider.getId())) entries.add(new Entry(provider, rule));
+            for (MagicRule rule : store.getRules(npc, provider.getId())) entries.add(new Entry(provider, rule, entries.size()));
         }
-        tickOrdered(npc, target, state, now, entries.stream().filter(e -> !e.rule.independent)
-            .sorted(Comparator.comparingInt(e -> e.rule.sequenceOrder())).toList());
+        var order = CombatDecisions.ordered(npc.getUUID(), entries.stream()
+            .map(e -> new CombatDecisions.Order(e.rule.sequenceOrder(), e.rule.independent)).toList());
+        if (Boolean.getBoolean("cnpcmagic.verify.combatParity"))
+            top.cnpcmagic.verify.MagicVerification.checkOrder(entries.stream().map(Entry::rule).toList(), order);
+        tickOrdered(npc, target, state, now, order.stream().map(entries::get).toList());
         tickIndependent(npc, target, state, now, entries);
         // Editor saves normally reset the state; also handle rules removed by in-process integrations.
         for (MagicRule rule : new ArrayList<>(state.rules.keySet())) {
@@ -114,7 +120,7 @@ public final class MagicCombatHandler {
             if (!runtime.isReady(now)) {
                 continue;
             }
-            if (!rule.conditions.test(npc, target, rule.range)) {
+            if (!testConditions(npc, target, entry)) {
                 continue;
             }
             face(npc, target);
@@ -173,7 +179,7 @@ public final class MagicCombatHandler {
                 }
                 continue;
             }
-            if (!runtime.isReady(now) || !rule.conditions.test(npc, target, rule.range)) continue;
+            if (!runtime.isReady(now) || !testConditions(npc, target, entry)) continue;
             face(npc, target);
             try {
                 runtime.active = NpcAnimationSync.withOwner(owner, false,
@@ -221,6 +227,7 @@ public final class MagicCombatHandler {
     }
 
     public static void reset(EntityNPCInterface npc) {
+        CombatDecisions.remove(npc.getUUID());
         NpcState state = STATES.remove(npc.getUUID());
         if (state != null) cancelAll(npc, state);
         NpcAnimationSync.stopAll(npc);
@@ -247,12 +254,14 @@ public final class MagicCombatHandler {
         npcs.forEach(MagicCombatHandler::reset);
         STATES.clear();
         NpcAnimationSync.clear();
+        CombatDecisions.clear();
     }
 
     @SubscribeEvent
     public static void onServerStopped(ServerStoppedEvent event) {
         STATES.clear();
         NpcAnimationSync.clear();
+        CombatDecisions.clear();
     }
 
     static void meleeFollowup(EntityNPCInterface npc, LivingEntity target) {
@@ -277,7 +286,14 @@ public final class MagicCombatHandler {
         if (npc instanceof Mob mob) mob.getLookControl().setLookAt(target, 30.0F, 30.0F);
     }
 
-    private record Entry(MagicProvider provider, MagicRule rule) {
+    private static boolean testConditions(EntityNPCInterface npc, LivingEntity target, Entry entry) {
+        boolean matches = CombatDecisions.test(npc.getUUID(), entry.slot, entry.rule.conditions.snapshot(npc, target, entry.rule.range));
+        if (Boolean.getBoolean("cnpcmagic.verify.combatParity"))
+            top.cnpcmagic.verify.MagicVerification.checkDecision(npc, target, entry.rule, matches);
+        return matches;
+    }
+
+    private record Entry(MagicProvider provider, MagicRule rule, int slot) {
     }
 
     private static final class NpcState {

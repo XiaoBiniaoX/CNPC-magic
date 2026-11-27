@@ -13,13 +13,13 @@ import net.minecraft.world.level.GameType;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.phys.Vec3;
-import net.minecraftforge.event.TickEvent;
-import net.minecraftforge.event.entity.EntityJoinLevelEvent;
-import net.minecraftforge.event.entity.player.PlayerEvent;
-import net.minecraftforge.event.server.ServerStoppingEvent;
-import net.minecraftforge.event.server.ServerStartedEvent;
-import net.minecraftforge.eventbus.api.EventPriority;
-import net.minecraftforge.eventbus.api.SubscribeEvent;
+import net.neoforged.neoforge.event.tick.*;
+import net.neoforged.neoforge.event.entity.EntityJoinLevelEvent;
+import net.neoforged.neoforge.event.entity.player.PlayerEvent;
+import net.neoforged.neoforge.event.server.ServerStoppingEvent;
+import net.neoforged.neoforge.event.server.ServerStartedEvent;
+import net.neoforged.bus.api.EventPriority;
+import net.neoforged.bus.api.SubscribeEvent;
 import noppes.npcs.NoppesUtilServer;
 import noppes.npcs.entity.EntityNPCInterface;
 import top.cnpcmagic.casting.*;
@@ -30,7 +30,7 @@ import java.util.*;
 /** Real spells run only in this dedicated void dimension. No preview rule is saved on the source NPC. */
 public final class MagicPreview {
     public interface EntityData { List<net.minecraft.network.syncher.SynchedEntityData.DataValue<?>> cnpcmagic$values(); }
-    public static final ResourceKey<Level> DIMENSION = ResourceKey.create(Registries.DIMENSION, new ResourceLocation("cnpcmagic", "preview"));
+    public static final ResourceKey<Level> DIMENSION = ResourceKey.create(Registries.DIMENSION, ResourceLocation.fromNamespaceAndPath("cnpcmagic", "preview"));
     private static final String RETURN = "CNPCMagicPreviewReturn";
     private static final Map<UUID, Session> SESSIONS = new HashMap<>();
     private static final Map<UUID, UUID> OWNERS = new HashMap<>();
@@ -90,7 +90,7 @@ public final class MagicPreview {
                 for (int z = -1; z <= 0; z++) s.arena.setChunkForced(x, z, false);
         }
         if (!saved.isEmpty()) {
-            var key = ResourceKey.create(Registries.DIMENSION, new ResourceLocation(saved.getString("dimension")));
+            var key = ResourceKey.create(Registries.DIMENSION, ResourceLocation.parse(saved.getString("dimension")));
             ServerLevel destination = player.server.getLevel(key); if (destination == null) destination = player.server.overworld();
             player.teleportTo(destination, saved.getDouble("x"), saved.getDouble("y"), saved.getDouble("z"), saved.getFloat("yaw"), saved.getFloat("pitch"));
             player.setGameMode(GameType.byId(saved.getInt("mode"))); player.getPersistentData().remove(RETURN);
@@ -102,8 +102,8 @@ public final class MagicPreview {
     }
     private static List<Entity> entities(ServerLevel level) { List<Entity> all = new ArrayList<>(); level.getAllEntities().forEach(all::add); return all; }
     public static boolean isPreview(Entity entity) { return entity.level().dimension().equals(DIMENSION) && OWNERS.containsKey(entity.getUUID()); }
-    @SubscribeEvent public static void tick(TickEvent.ServerTickEvent event) {
-        if (event.phase != TickEvent.Phase.END) return;
+    @SubscribeEvent public static void tick(ServerTickEvent.Post event) {
+        
         for (var entry : new ArrayList<>(SESSIONS.entrySet())) {
             Session s = entry.getValue(); ServerPlayer player = s.arena.getServer().getPlayerList().getPlayer(entry.getKey());
             if (player == null) continue;
@@ -161,11 +161,12 @@ public final class MagicPreview {
             OWNERS.put(entity.getUUID(), entry.getKey());
     }
     public static void nativePacket(ResourceKey<Level> dimension, double x, net.minecraft.network.protocol.Packet<?> packet) {
-        if (!dimension.equals(DIMENSION) || !(packet instanceof net.minecraft.network.protocol.game.ClientboundCustomPayloadPacket)) return;
+        if (!dimension.equals(DIMENSION) || !(packet instanceof net.minecraft.network.protocol.common.ClientboundCustomPayloadPacket payload)) return;
         for (Session session : SESSIONS.values()) if (Math.abs(x - session.origin.getX()) < 192) {
-            var buffer = new net.minecraft.network.FriendlyByteBuf(io.netty.buffer.Unpooled.buffer());
+            var buffer = new net.minecraft.network.RegistryFriendlyByteBuf(io.netty.buffer.Unpooled.buffer(), session.arena.registryAccess());
             try {
-                packet.write(buffer); byte[] bytes = new byte[buffer.readableBytes()]; buffer.readBytes(bytes);
+                net.minecraft.network.protocol.common.ClientboundCustomPayloadPacket.GAMEPLAY_STREAM_CODEC.encode(buffer, payload);
+                byte[] bytes = new byte[buffer.readableBytes()]; buffer.readBytes(bytes);
                 session.nativePackets.add(new net.minecraft.nbt.ByteArrayTag(bytes));
             } finally { buffer.release(); }
         }
@@ -174,10 +175,11 @@ public final class MagicPreview {
                                  int count, double dx, double dy, double dz, double speed) {
         if (!level.dimension().equals(DIMENSION)) return;
         for (Session session : SESSIONS.values()) if (Math.abs(x - session.origin.getX()) < 192) {
-            var buffer = new net.minecraft.network.FriendlyByteBuf(io.netty.buffer.Unpooled.buffer());
+            var buffer = new net.minecraft.network.RegistryFriendlyByteBuf(io.netty.buffer.Unpooled.buffer(), level.registryAccess());
             try {
-                new net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket(type, true, x, y, z,
-                    (float)dx, (float)dy, (float)dz, (float)speed, count).write(buffer);
+                net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket.STREAM_CODEC.encode(buffer,
+                    new net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket(type, true, x, y, z,
+                    (float)dx, (float)dy, (float)dz, (float)speed, count));
                 byte[] bytes = new byte[buffer.readableBytes()]; buffer.readBytes(bytes);
                 session.particles.add(new net.minecraft.nbt.ByteArrayTag(bytes));
             } finally { buffer.release(); }
@@ -202,8 +204,6 @@ public final class MagicPreview {
             try { if (cast != null) cast.cancel(npc); }
             catch (RuntimeException | LinkageError error) { top.cnpcmagic.CNPCMagic.LOGGER.error("Preview adapter failed to clean up", error); }
             cast = null;
-            if (npc != null && target != null && top.cnpcmagic.provider.MagicProviders.get("ebwizardry") != null)
-                top.cnpcmagic.compat.ebwizardry.EbWizardryPreview.clear(npc, target);
             for (Entity entity : entities(arena)) if (owner.equals(OWNERS.get(entity.getUUID()))) entity.discard();
             OWNERS.entrySet().removeIf(entry -> entry.getValue().equals(owner));
         }
@@ -218,8 +218,8 @@ public final class MagicPreview {
                     if (entity instanceof LivingEntity living) initial.put("Attributes", living.getAttributes().save());
                     initial.putString("id", net.minecraft.core.registries.BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()).toString());
                     if (entity instanceof EntityNPCInterface npc) initial.put("npcSpawn", npc.writeSpawnData());
-                    if (entity instanceof net.minecraftforge.entity.IEntityAdditionalSpawnData extra) {
-                        var buffer = new net.minecraft.network.FriendlyByteBuf(io.netty.buffer.Unpooled.buffer());
+                    if (entity instanceof net.neoforged.neoforge.entity.IEntityWithComplexSpawn extra) {
+                        var buffer = new net.minecraft.network.RegistryFriendlyByteBuf(io.netty.buffer.Unpooled.buffer(), arena.registryAccess());
                         try {
                             extra.writeSpawnData(buffer); byte[] bytes = new byte[buffer.readableBytes()]; buffer.readBytes(bytes);
                             initial.putByteArray("extraSpawn", bytes);
@@ -228,16 +228,22 @@ public final class MagicPreview {
                     actor.put("initial", initial);
                 }
                 actor.putDouble("x", entity.getX()); actor.putDouble("y", entity.getY()); actor.putDouble("z", entity.getZ());
+                Vec3 motion = entity.getDeltaMovement();
+                actor.putDouble("dx", motion.x); actor.putDouble("dy", motion.y); actor.putDouble("dz", motion.z);
+                actor.putBoolean("onGround", entity.onGround());
                 actor.putFloat("yaw", entity.getYRot()); actor.putFloat("pitch", entity.getXRot());
                 actor.putInt("age", entity.tickCount); actor.putInt("vehicle", entity.getVehicle() == null ? -1 : entity.getVehicle().getId());
+                if (entity instanceof net.minecraft.world.entity.projectile.Projectile projectile)
+                    actor.putInt("owner", projectile.getOwner() == null ? -1 : projectile.getOwner().getId());
                 if (entity instanceof LivingEntity living) {
                     actor.putFloat("head", living.getYHeadRot()); actor.putFloat("body", living.yBodyRot); actor.putInt("hurt", living.hurtTime);
                 }
                 var values = ((EntityData)entity.getEntityData()).cnpcmagic$values();
                 if (values != null) {
-                    var buffer = new net.minecraft.network.FriendlyByteBuf(io.netty.buffer.Unpooled.buffer());
+                    var buffer = new net.minecraft.network.RegistryFriendlyByteBuf(io.netty.buffer.Unpooled.buffer(), arena.registryAccess());
                     try {
-                        new net.minecraft.network.protocol.game.ClientboundSetEntityDataPacket(entity.getId(), values).write(buffer);
+                        net.minecraft.network.protocol.game.ClientboundSetEntityDataPacket.STREAM_CODEC.encode(buffer,
+                            new net.minecraft.network.protocol.game.ClientboundSetEntityDataPacket(entity.getId(), values));
                         byte[] bytes = new byte[buffer.readableBytes()]; buffer.readBytes(bytes); actor.putByteArray("data", bytes);
                     } finally { buffer.release(); }
                 }
@@ -255,17 +261,15 @@ public final class MagicPreview {
             net.minecraft.nbt.ListTag blockEntities = new net.minecraft.nbt.ListTag();
             for (BlockPos pos : BlockPos.betweenClosed(origin.offset(-4, 0, -4), origin.offset(20, 5, 4))) {
                 var blockEntity = arena.getBlockEntity(pos);
-                if (blockEntity != null) blockEntities.add(blockEntity.saveWithFullMetadata());
+                if (blockEntity != null) blockEntities.add(blockEntity.saveWithFullMetadata(arena.registryAccess()));
             }
             frame.put("blockEntities", blockEntities);
             frame.put("blocks", blocks); frame.put("particles", particles.copy()); particles.clear();
             frame.put("nativePackets", nativePackets.copy()); nativePackets.clear(); MagicSync.send(player, frame);
         }
         boolean spawn(UUID owner) {
-            boolean wizardry = spell.startsWith("ebwizardry:");
-            if (wizardry) top.cnpcmagic.compat.ebwizardry.EbWizardryPreview.resetArena(arena, origin);
             if (!(original.getType().create(arena) instanceof EntityNPCInterface copy)) return false;
-            target = (wizardry && !spell.equals("ebwizardry:ray_of_purification") ? EntityType.PILLAGER : EntityType.HUSK).create(arena);
+            target = EntityType.HUSK.create(arena);
             if (target == null) return false;
             npc = copy;
             npc.readSpawnData(original.writeSpawnData().copy()); npc.setUUID(UUID.randomUUID()); npc.setNoAi(true);
@@ -274,16 +278,11 @@ public final class MagicPreview {
             npc.moveTo(origin.getX(), 80, 0, -90, 0); npc.setYHeadRot(-90); npc.setYBodyRot(-90); npc.setHealth(npc.getMaxHealth());
             target.setNoAi(true); target.getAttribute(Attributes.MAX_HEALTH).setBaseValue(1000); target.setHealth(1000);
             target.setCustomName(net.minecraft.network.chat.Component.literal("Target")); target.setPersistenceRequired();
-            double distance = meleeFollowup ? 1.1 : wizardry ? top.cnpcmagic.compat.ebwizardry.EbWizardryPreview.targetDistance(spell) : 6;
+            double distance = meleeFollowup ? 1.1 : 6;
             target.moveTo(origin.getX() + distance, 80, 0, 90, 0);
-            if (wizardry) top.cnpcmagic.compat.ebwizardry.EbWizardryPreview.prepare(spell, npc, target);
             OWNERS.put(npc.getUUID(), owner); OWNERS.put(target.getUUID(), owner);
             npc.setTarget(target); MagicCombatHandler.face(npc, target);
             if (!arena.addFreshEntity(npc) || !arena.addFreshEntity(target)) return false;
-            if (spell.equals("ebwizardry:font_of_mana")) {
-                Entity recipient = top.cnpcmagic.compat.ebwizardry.EbWizardryPreview.manaRecipient(npc);
-                OWNERS.put(recipient.getUUID(), owner);
-            }
             return true;
         }
     }

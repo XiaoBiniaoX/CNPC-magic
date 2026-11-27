@@ -14,22 +14,26 @@ import net.minecraft.core.particles.ParticleOptions;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.network.RegistryFriendlyByteBuf;
+import net.minecraft.network.protocol.common.ClientboundCustomPayloadPacket;
 import net.minecraft.network.protocol.game.ClientboundSetEntityDataPacket;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.*;
 import net.minecraft.world.level.LightLayer;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraftforge.api.distmarker.Dist;
-import net.minecraftforge.event.TickEvent;
-import net.minecraftforge.eventbus.api.SubscribeEvent;
-import net.minecraftforge.fml.common.Mod;
+import net.neoforged.api.distmarker.Dist;
+import net.neoforged.neoforge.event.tick.*;
+import net.neoforged.neoforge.client.event.ClientTickEvent;
+import net.neoforged.neoforge.client.event.RenderFrameEvent;
+import net.neoforged.bus.api.SubscribeEvent;
+import net.neoforged.fml.common.Mod;
 import org.joml.Matrix4f;
 import top.cnpcmagic.CNPCMagic;
 import java.util.*;
 
 /** A display-only copy of the server's arena. The connected player's world is never replaced. */
-@Mod.EventBusSubscriber(modid = CNPCMagic.MODID, value = Dist.CLIENT)
+@net.neoforged.fml.common.EventBusSubscriber(modid = CNPCMagic.MODID, value = Dist.CLIENT)
 public final class PreviewScene extends ClientLevel {
     public interface ParticleProviders { Map<ResourceLocation, ParticleProvider<?>> cnpcmagic$providers(); }
     private static PreviewScene scene;
@@ -66,6 +70,7 @@ public final class PreviewScene extends ClientLevel {
     }
 
     @Override public BlockState getBlockState(BlockPos pos) { return blocks.getOrDefault(pos, Blocks.AIR.defaultBlockState()); }
+    @Override public net.minecraft.world.level.BlockGetter getChunkForCollisions(int x, int z) { return this; }
     @Override public net.minecraft.world.level.block.entity.BlockEntity getBlockEntity(BlockPos pos) { return blockEntities.get(pos); }
     public Collection<net.minecraft.world.level.block.entity.BlockEntity> previewBlockEntities() { return blockEntities.values(); }
     @Override public int getBrightness(LightLayer layer, BlockPos pos) { return 15; }
@@ -109,7 +114,7 @@ public final class PreviewScene extends ClientLevel {
         for (var raw : frame.getList("blockEntities", 10)) {
             CompoundTag tag = (CompoundTag)raw;
             BlockPos pos = new BlockPos(tag.getInt("x"), tag.getInt("y"), tag.getInt("z"));
-            var blockEntity = net.minecraft.world.level.block.entity.BlockEntity.loadStatic(pos, getBlockState(pos), tag);
+            var blockEntity = net.minecraft.world.level.block.entity.BlockEntity.loadStatic(pos, getBlockState(pos), tag, registryAccess());
             if (blockEntity != null) { blockEntity.setLevel(this); blockEntities.put(pos, blockEntity); }
         }
         Set<Integer> ids = new HashSet<>();
@@ -122,21 +127,23 @@ public final class PreviewScene extends ClientLevel {
                 if (entity == null) continue;
                 if (entity instanceof LivingEntity living) living.getAttributes().load(initial.getList("Attributes", 10));
                 if (entity instanceof noppes.npcs.entity.EntityNPCInterface npc) npc.readSpawnData(initial.getCompound("npcSpawn"));
-                entity.setId(id); putNonPlayerEntity(id, entity);
-                if (entity instanceof net.minecraftforge.entity.IEntityAdditionalSpawnData extra && initial.contains("extraSpawn")) {
-                    FriendlyByteBuf buffer = new FriendlyByteBuf(io.netty.buffer.Unpooled.wrappedBuffer(initial.getByteArray("extraSpawn")));
+                entity.setId(id); addEntity(entity);
+                if (entity instanceof net.neoforged.neoforge.entity.IEntityWithComplexSpawn extra && initial.contains("extraSpawn")) {
+                    var buffer = new RegistryFriendlyByteBuf(io.netty.buffer.Unpooled.wrappedBuffer(initial.getByteArray("extraSpawn")), registryAccess());
                     try { extra.readSpawnData(buffer); } finally { buffer.release(); }
                 }
             }
             if (entity == null) continue;
             entity.moveTo(actor.getDouble("x"), actor.getDouble("y"), actor.getDouble("z"), actor.getFloat("yaw"), actor.getFloat("pitch"));
-            entity.tickCount = actor.getInt("age");
+            entity.setDeltaMovement(actor.getDouble("dx"), actor.getDouble("dy"), actor.getDouble("dz"));
+            entity.setOnGround(actor.getBoolean("onGround"));
+            entity.tickCount = Math.max(entity.tickCount, actor.getInt("age"));
             if (entity instanceof LivingEntity living) {
                 living.setYHeadRot(actor.getFloat("head")); living.yBodyRot = actor.getFloat("body"); living.hurtTime = actor.getInt("hurt");
             }
             if (actor.contains("data")) {
-                FriendlyByteBuf buffer = new FriendlyByteBuf(io.netty.buffer.Unpooled.wrappedBuffer(actor.getByteArray("data")));
-                try { entity.getEntityData().assignValues(new ClientboundSetEntityDataPacket(buffer).packedItems()); }
+                var buffer = new RegistryFriendlyByteBuf(io.netty.buffer.Unpooled.wrappedBuffer(actor.getByteArray("data")), registryAccess());
+                try { entity.getEntityData().assignValues(ClientboundSetEntityDataPacket.STREAM_CODEC.decode(buffer).packedItems()); }
                 finally { buffer.release(); }
             }
         }
@@ -145,16 +152,18 @@ public final class PreviewScene extends ClientLevel {
         for (var raw : frame.getList("entities", 10)) {
             CompoundTag actor = (CompoundTag)raw; Entity entity = getEntity(actor.getInt("id")), vehicle = getEntity(actor.getInt("vehicle"));
             if (entity != null) { if (vehicle != null) entity.startRiding(vehicle, true); else entity.stopRiding(); }
+            if (entity instanceof net.minecraft.world.entity.projectile.Projectile projectile && actor.contains("owner"))
+                projectile.setOwner(getEntity(actor.getInt("owner")));
         }
         for (var raw : frame.getList("nativePackets", 7)) {
-            FriendlyByteBuf buffer = new FriendlyByteBuf(io.netty.buffer.Unpooled.wrappedBuffer(((net.minecraft.nbt.ByteArrayTag)raw).getAsByteArray()));
-            try { new net.minecraft.network.protocol.game.ClientboundCustomPayloadPacket(buffer).handle(Minecraft.getInstance().getConnection()); }
+            var buffer = new RegistryFriendlyByteBuf(io.netty.buffer.Unpooled.wrappedBuffer(((net.minecraft.nbt.ByteArrayTag)raw).getAsByteArray()), registryAccess());
+            try { ClientboundCustomPayloadPacket.GAMEPLAY_STREAM_CODEC.decode(buffer).handle(Minecraft.getInstance().getConnection()); }
             finally { buffer.release(); }
         }
         for (var raw : frame.getList("particles", 7)) {
-            FriendlyByteBuf buffer = new FriendlyByteBuf(io.netty.buffer.Unpooled.wrappedBuffer(((net.minecraft.nbt.ByteArrayTag)raw).getAsByteArray()));
+            var buffer = new RegistryFriendlyByteBuf(io.netty.buffer.Unpooled.wrappedBuffer(((net.minecraft.nbt.ByteArrayTag)raw).getAsByteArray()), registryAccess());
             try {
-                var packet = new net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket(buffer);
+                var packet = net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket.STREAM_CODEC.decode(buffer);
                 if (packet.getCount() == 0) particle(packet.getParticle(), packet.getX(), packet.getY(), packet.getZ(),
                     packet.getMaxSpeed() * packet.getXDist(), packet.getMaxSpeed() * packet.getYDist(), packet.getMaxSpeed() * packet.getZDist());
                 else for (int i = 0; i < packet.getCount(); i++) particle(packet.getParticle(),
@@ -164,8 +173,8 @@ public final class PreviewScene extends ClientLevel {
         }
     }
 
-    @SubscribeEvent public static void tick(TickEvent.ClientTickEvent event) {
-        if (event.phase != TickEvent.Phase.END || scene == null) return;
+    @SubscribeEvent public static void tick(ClientTickEvent.Post event) {
+        if (scene == null) return;
         if (Minecraft.getInstance().level == null) { dispose(); return; }
         scene.within(() -> {
             for (Entity entity : java.util.stream.StreamSupport.stream(scene.entitiesForRendering().spliterator(), false).toList())
@@ -183,12 +192,12 @@ public final class PreviewScene extends ClientLevel {
     }
     private void draw(GuiGraphics graphics, int x, int y, int width, int height, float partial) {
         Minecraft mc = Minecraft.getInstance(); graphics.flush();
-        int pixels = mc.getWindow().getGuiScale() > 1 ? 2 : 1;
+        int pixels = Math.max(1, (int)Math.ceil(mc.getWindow().getGuiScale()));
         if (target == null) target = new TextureTarget(width * pixels, height * pixels, true, Minecraft.ON_OSX);
         else if (target.width != width * pixels || target.height != height * pixels) target.resize(width * pixels, height * pixels, Minecraft.ON_OSX);
         Matrix4f projection = new Matrix4f(RenderSystem.getProjectionMatrix());
         var sorting = RenderSystem.getVertexSorting();
-        PoseStack modelView = RenderSystem.getModelViewStack(); modelView.pushPose(); modelView.setIdentity(); RenderSystem.applyModelViewMatrix();
+        var modelView = RenderSystem.getModelViewStack(); modelView.pushMatrix(); modelView.identity(); RenderSystem.applyModelViewMatrix();
         var dispatcher = mc.getEntityRenderDispatcher(); Camera originalCamera = dispatcher.camera;
         var blockDispatcher = mc.getBlockEntityRenderDispatcher();
         Entity originalCrosshair = dispatcher.crosshairPickEntity;
@@ -213,38 +222,34 @@ public final class PreviewScene extends ClientLevel {
                 BlockPos pos = blockEntity.getBlockPos(); pose.pushPose(); pose.translate(pos.getX() - eye.x, pos.getY() - eye.y, pos.getZ() - eye.z);
                 blockDispatcher.render(blockEntity, partial, pose, buffers); pose.popPose();
             }
+            // Native color-only beams must draw after the opaque arena, as in the world renderer.
+            buffers.endBatch();
             for (Entity entity : entitiesForRendering()) if (!entity.isRemoved())
                 dispatcher.render(entity, entity.getX() - eye.x, entity.getY() - eye.y, entity.getZ() - eye.z, entity.getYRot(), partial, pose, buffers, 15728880);
             buffers.endBatch();
-            if (net.minecraftforge.fml.ModList.get().isLoaded("ebwizardry")) {
-                com.binaris.wizardry.client.effect.ArcaneLockRender.markDirty();
-                com.binaris.wizardry.client.effect.ArcaneLockRender.render(camera, pose, partial);
-                com.binaris.wizardry.client.effect.ArcaneLockRender.markDirty();
-            }
-            PoseStack particlePose = new PoseStack(); particlePose.mulPoseMatrix(pose.last().pose());
-            modelView.mulPoseMatrix(particlePose.last().pose()); RenderSystem.applyModelViewMatrix();
+            modelView.mul(pose.last().pose()); RenderSystem.applyModelViewMatrix();
             // Entity buffer batches clear their lightmap state; particles bind it again, as ParticleEngine does.
             mc.gameRenderer.lightTexture().turnOnLightLayer(); RenderSystem.setShaderColor(1, 1, 1, 1);
             for (var entry : particles.entrySet()) if (entry.getKey() != ParticleRenderType.NO_RENDER && !entry.getValue().isEmpty()) {
                 RenderSystem.setShader(net.minecraft.client.renderer.GameRenderer::getParticleShader);
-                var tesselator = Tesselator.getInstance(); var buffer = tesselator.getBuilder();
-                entry.getKey().begin(buffer, mc.getTextureManager());
+                var buffer = entry.getKey().begin(Tesselator.getInstance(), mc.getTextureManager());
+                if (buffer == null) continue;
                 for (Particle particle : entry.getValue()) particle.render(buffer, camera, partial);
-                entry.getKey().end(tesselator);
+                var mesh = buffer.build();
+                if (mesh != null) BufferUploader.drawWithShader(mesh);
             }
         } finally {
             dispatcher.prepare(mc.player.level(), originalCamera, originalCrosshair); dispatcher.setRenderShadow(true);
             blockDispatcher.prepare(mc.player.level(), originalCamera, mc.hitResult);
             mc.gameRenderer.lightTexture().turnOffLightLayer();
             mc.getMainRenderTarget().bindWrite(true); RenderSystem.setProjectionMatrix(projection, sorting);
-            modelView.popPose(); RenderSystem.applyModelViewMatrix(); RenderSystem.disableBlend(); RenderSystem.enableDepthTest(); RenderSystem.depthMask(true);
+            modelView.popMatrix(); RenderSystem.applyModelViewMatrix(); RenderSystem.disableBlend(); RenderSystem.enableDepthTest(); RenderSystem.depthMask(true);
         }
         RenderSystem.setShader(net.minecraft.client.renderer.GameRenderer::getPositionTexShader);
         RenderSystem.setShaderTexture(0, target.getColorTextureId()); RenderSystem.setShaderColor(1, 1, 1, 1);
-        var buffer = Tesselator.getInstance().getBuilder(); var matrix = graphics.pose().last().pose();
-        buffer.begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_TEX);
-        buffer.vertex(matrix, x, y + height, 0).uv(0, 0).endVertex(); buffer.vertex(matrix, x + width, y + height, 0).uv(1, 0).endVertex();
-        buffer.vertex(matrix, x + width, y, 0).uv(1, 1).endVertex(); buffer.vertex(matrix, x, y, 0).uv(0, 1).endVertex();
-        BufferUploader.drawWithShader(buffer.end());
+        var buffer = Tesselator.getInstance().begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_TEX); var matrix = graphics.pose().last().pose();
+        buffer.addVertex(matrix, x, y + height, 0).setUv(0, 0); buffer.addVertex(matrix, x + width, y + height, 0).setUv(1, 0);
+        buffer.addVertex(matrix, x + width, y, 0).setUv(1, 1); buffer.addVertex(matrix, x, y, 0).setUv(0, 1);
+        BufferUploader.drawWithShader(buffer.buildOrThrow());
     }
 }

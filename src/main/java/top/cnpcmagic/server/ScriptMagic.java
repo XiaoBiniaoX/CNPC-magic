@@ -3,12 +3,12 @@ package top.cnpcmagic.server;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Mob;
-import net.minecraftforge.event.TickEvent;
-import net.minecraftforge.event.entity.EntityLeaveLevelEvent;
-import net.minecraftforge.event.server.ServerStartedEvent;
-import net.minecraftforge.event.server.ServerStoppingEvent;
-import net.minecraftforge.eventbus.api.EventPriority;
-import net.minecraftforge.eventbus.api.SubscribeEvent;
+import net.neoforged.neoforge.event.tick.*;
+import net.neoforged.neoforge.event.entity.EntityLeaveLevelEvent;
+import net.neoforged.neoforge.event.server.ServerStartedEvent;
+import net.neoforged.neoforge.event.server.ServerStoppingEvent;
+import net.neoforged.bus.api.EventPriority;
+import net.neoforged.bus.api.SubscribeEvent;
 import noppes.npcs.api.entity.IEntity;
 import noppes.npcs.entity.EntityNPCInterface;
 import top.cnpcmagic.CNPCMagic;
@@ -139,8 +139,8 @@ public final class ScriptMagic {
     }
 
     @SubscribeEvent
-    public static void tick(TickEvent.ServerTickEvent event) {
-        if (event.phase != TickEvent.Phase.END) return;
+    public static void tick(ServerTickEvent.Post event) {
+        
         for (var entry : new ArrayList<>(ACTIVE.entrySet())) {
             LivingEntity caster = entry.getKey();
             Session session = entry.getValue();

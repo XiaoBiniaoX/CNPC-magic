@@ -75,7 +75,7 @@ public class GuiNpcMagic extends EditorScreen implements IGuiData {
                 button(14 + half, bottom - 20, side - half - 2, "library", () -> { if (flushDetail()) minecraft.setScreen(new LibraryScreen(this)); });
             }
         } else label(x, 68, "cnpcmagic.gui.loading");
-        if (!requested) { requested = true; NetworkHandler.CHANNEL.sendToServer(new C2SMagicRequest()); }
+        if (!requested) { requested = true; net.neoforged.neoforge.network.PacketDistributor.sendToServer(new C2SMagicRequest()); }
     }
     List<String> providerIds() {
         List<String> ids = new ArrayList<>(); ids.add("cnpcmagic");
@@ -90,10 +90,10 @@ public class GuiNpcMagic extends EditorScreen implements IGuiData {
             return definition.name.equals(path.replace('_', ' ')) && net.minecraft.locale.Language.getInstance().has(key)
                 ? Component.translatable(key).getString() : definition.name;
         }
-        int colon = id.indexOf(':'); ClientMagicProvider p = colon < 0 ? null : ClientMagicProviders.get(id.substring(0, colon));
+        ClientMagicProvider p = ClientMagicProviders.forSpell(id);
         return p == null ? id.isEmpty() ? text("cnpcmagic.gui.none") : id : p.getDisplayName(id);
     }
-    int maxLevel(String id) { int colon = id.indexOf(':'); var p = colon < 0 ? null : ClientMagicProviders.get(id.substring(0, colon)); return id.startsWith("cnpcmagic:") ? 10 : p == null ? Integer.MAX_VALUE : Math.max(1, p.getMaxLevel(id)); }
+    int maxLevel(String id) { var p = ClientMagicProviders.forSpell(id); return id.startsWith("cnpcmagic:") ? 10 : p == null ? Integer.MAX_VALUE : Math.max(1, p.getMaxLevel(id)); }
     void openPicker(RuleEditor edit) {
         picker = new SpellPicker(this, edit); rebuild();
         if (edit != null && !edit.rule.spellId.isEmpty()) picker.preview();
@@ -107,10 +107,10 @@ public class GuiNpcMagic extends EditorScreen implements IGuiData {
         var entries = rules.get(provider);
         entries.remove(selected); detail = null; status = ""; rebuild();
     }
-    @Override public boolean mouseScrolled(double x, double y, double delta) {
+    @Override public boolean mouseScrolled(double x, double y, double horizontal, double delta) {
         if (picker != null && picker.scroll(x, y, delta)) return true;
         if (picker == null && detail != null && detail.scroll(x, y, delta)) return true;
-        return super.mouseScrolled(x, y, delta);
+        return super.mouseScrolled(x, y, horizontal, delta);
     }
     @Override public void render(GuiGraphics g, int mx, int my, float partial) {
         if (picker != null) { picker.render(g, mx, my, partial); return; }
@@ -136,7 +136,7 @@ public class GuiNpcMagic extends EditorScreen implements IGuiData {
         synced = true; baseline = snapshot().copy(); if (minecraft.screen == this) rebuild();
     }
     boolean flushDetail() { return detail == null || detail.apply(); }
-    public void save() { if (!synced || saving || !flushDetail()) return; pendingSave = snapshot().copy(); saving = true; status = text("saving"); NetworkHandler.CHANNEL.sendToServer(new C2SMagicSave(pendingSave)); rebuild(); }
+    public void save() { if (!synced || saving || !flushDetail()) return; pendingSave = snapshot().copy(); saving = true; status = text("saving"); net.neoforged.neoforge.network.PacketDistributor.sendToServer(new C2SMagicSave(pendingSave)); rebuild(); }
     void saved(CompoundTag data) {
         if (!data.hasUUID("npc") || !data.getUUID("npc").equals(npc.getUUID())) return;
         if (!saving || pendingSave == null) return;

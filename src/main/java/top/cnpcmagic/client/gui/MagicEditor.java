@@ -15,7 +15,7 @@ public final class MagicEditor {
     public static boolean isPreviewTransitionActive() { return previewTransition; }
 
     public static void send(String action) { CompoundTag t = new CompoundTag(); t.putString("action", action); send(t); }
-    public static void send(CompoundTag data) { NetworkHandler.CHANNEL.sendToServer(new C2MMagicEditor(data)); }
+    public static void send(CompoundTag data) { net.neoforged.neoforge.network.PacketDistributor.sendToServer(new C2MMagicEditor(data)); }
     public static void receive(CompoundTag data) {
         SpellPicker picker = editor == null ? null : editor.picker;
         switch (data.getString("action")) {
@@ -48,7 +48,7 @@ public final class MagicEditor {
             }
         }
     }
-    public static void registerBoltRenderer(net.minecraftforge.client.event.EntityRenderersEvent.RegisterRenderers event) {
+    public static void registerBoltRenderer(net.neoforged.neoforge.client.event.EntityRenderersEvent.RegisterRenderers event) {
         event.registerEntityRenderer(top.cnpcmagic.casting.BuiltinSpell.BOLT.get(), net.minecraft.client.renderer.entity.ThrownItemRenderer::new);
     }
 }

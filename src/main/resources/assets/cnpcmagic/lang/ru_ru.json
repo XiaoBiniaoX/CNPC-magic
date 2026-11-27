@@ -53,6 +53,8 @@
   "cnpcmagic.editor.continue": "Продолжить",
   "cnpcmagic.editor.invalidNumbers": "Проверьте уровень, число, задержку и дальность.",
   "cnpcmagic.editor.search": "Имя или ID заклинания",
+  "cnpcmagic.editor.allSchools": "Все школы",
+  "cnpcmagic.editor.schoolFilter": "Школа: %s (нажмите для выбора)",
   "cnpcmagic.editor.previewHint": "Испытать с этим NPC",
   "cnpcmagic.editor.target": "Цель",
   "cnpcmagic.editor.entity": "Существо",

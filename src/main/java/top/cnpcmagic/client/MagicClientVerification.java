@@ -5,11 +5,13 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.Screenshot;
 import net.minecraft.client.model.HumanoidModel;
 import net.minecraft.world.entity.LivingEntity;
-import net.minecraftforge.api.distmarker.Dist;
-import net.minecraftforge.event.TickEvent;
-import net.minecraftforge.eventbus.api.SubscribeEvent;
-import net.minecraftforge.fml.ModList;
-import net.minecraftforge.fml.common.Mod;
+import net.neoforged.api.distmarker.Dist;
+import net.neoforged.neoforge.event.tick.*;
+import net.neoforged.neoforge.client.event.ClientTickEvent;
+import net.neoforged.neoforge.client.event.RenderFrameEvent;
+import net.neoforged.bus.api.SubscribeEvent;
+import net.neoforged.fml.ModList;
+import net.neoforged.fml.common.Mod;
 import top.cnpcmagic.CNPCMagic;
 import top.cnpcmagic.client.provider.ClientMagicProvider;
 import top.cnpcmagic.client.provider.ClientMagicProviders;
@@ -30,7 +32,7 @@ import java.util.HashMap;
 import java.util.UUID;
 
 /** Opt-in checks use the game's framebuffer, never desktop focus/input automation. */
-@Mod.EventBusSubscriber(modid = CNPCMagic.MODID, value = Dist.CLIENT)
+@net.neoforged.fml.common.EventBusSubscriber(modid = CNPCMagic.MODID, value = Dist.CLIENT)
 public final class MagicClientVerification {
     private static final Set<String> POSES = new HashSet<>();
     private static final Set<String> HELD = new HashSet<>();
@@ -41,6 +43,23 @@ public final class MagicClientVerification {
     private static EntityNPCInterface guiNpc;
     private static int guiStage;
     private static int guiReadyAt;
+    private static LivingEntity beamNpc;
+    private static int beamTick, beamRun;
+    private static boolean beamHeld, beamCleared;
+
+    public static void ironRendered(LivingEntity entity) {
+        if (!Boolean.getBoolean("cnpcmagic.verify.ironGameplay") || entity.level() != Minecraft.getInstance().level) return;
+        if (beamTick == ticks) return;
+        beamRun = beamNpc == entity && beamTick == ticks - 1 ? beamRun + 1 : 1;
+        beamNpc = entity; beamTick = ticks;
+        if (beamRun >= 6 && !beamHeld) {
+            var data = io.redspace.ironsspellbooks.api.magic.MagicData.getPlayerMagicData(entity);
+            require(data.getAdditionalCastData() instanceof io.redspace.ironsspellbooks.spells.CastingMobAimingData,
+                "ordinary NPC native aiming data received");
+            beamHeld = true; capture = true;
+            CNPCMagic.LOGGER.info("VERIFY CLIENT PASS ordinary NPC native beam held={} aiming=true actor={}", beamRun, entity.getUUID());
+        }
+    }
 
     public static void applied(LivingEntity entity, String animation, HumanoidModel<?> model) {
         if (!Boolean.getBoolean("cnpcmagic.verify.client")) return;
@@ -59,12 +78,20 @@ public final class MagicClientVerification {
     }
 
     @SubscribeEvent
-    public static void tick(TickEvent.ClientTickEvent event) {
-        if (!Boolean.getBoolean("cnpcmagic.verify.client") || event.phase != TickEvent.Phase.END) return;
+    public static void tick(ClientTickEvent.Post event) {
+        if (!Boolean.getBoolean("cnpcmagic.verify.client")) return;
         Minecraft mc = Minecraft.getInstance();
         if (mc.player == null || mc.level == null) return;
         ticks++;
+        boolean gameplay = Boolean.getBoolean("cnpcmagic.verify.ironGameplay");
         if (ticks >= 450 && ticks < 600) verifyIndependentGui(mc);
+        if (gameplay && beamHeld && !beamCleared) {
+            var data = io.redspace.ironsspellbooks.api.magic.MagicData.getPlayerMagicData(beamNpc);
+            if (!data.isCasting() && data.getAdditionalCastData() == null) {
+                beamCleared = true;
+                CNPCMagic.LOGGER.info("VERIFY CLIENT PASS ordinary NPC native cast and aiming cleanup");
+            }
+        }
         if (ticks == 40) {
             try {
                 verifyLanguage(mc);
@@ -72,7 +99,7 @@ public final class MagicClientVerification {
                 CNPCMagic.LOGGER.error("VERIFY CLIENT FAIL language", e);
             }
             boolean valid = true;
-            for (String id : java.util.List.of("irons_spellbooks", "goety", "ebwizardry", "ars_nouveau")) {
+            for (String id : java.util.List.of("irons_spellbooks", "goety", "ars_nouveau")) {
                 ClientMagicProvider provider = ClientMagicProviders.get(id);
                 valid &= (provider != null) == ModList.get().isLoaded(id);
                 if (provider != null) valid &= !provider.getSpellIds().isEmpty();
@@ -83,6 +110,7 @@ public final class MagicClientVerification {
         }
         if (ticks == 600) {
             if (guiStage < 4) CNPCMagic.LOGGER.error("VERIFY CLIENT FAIL independent GUI did not finish (stage={})", guiStage);
+            if (gameplay && (!beamHeld || !beamCleared)) CNPCMagic.LOGGER.error("VERIFY CLIENT FAIL ordinary NPC beam held={} cleanup={}", beamHeld, beamCleared);
             boolean valid = POSES.stream().anyMatch(id -> id.startsWith("goety:")) == ModList.get().isLoaded("goety")
                 && POSES.stream().anyMatch(id -> id.startsWith("irons_spellbooks:")) == ModList.get().isLoaded("irons_spellbooks")
                 && HELD.stream().anyMatch(id -> id.startsWith("goety:")) == ModList.get().isLoaded("goety")
@@ -99,7 +127,7 @@ public final class MagicClientVerification {
     private static void verifyLanguage(Minecraft mc) throws IOException {
         String language = System.getProperty("cnpcmagic.verify.language", mc.options.languageCode);
         require(language.equals(mc.options.languageCode), "selected Minecraft language matches test language");
-        var resource = mc.getResourceManager().getResource(new ResourceLocation(CNPCMagic.MODID, "lang/" + language + ".json")).orElseThrow();
+        var resource = mc.getResourceManager().getResource(ResourceLocation.fromNamespaceAndPath(CNPCMagic.MODID, "lang/" + language + ".json")).orElseThrow();
         try (var reader = new InputStreamReader(resource.open(), StandardCharsets.UTF_8)) {
             var translations = JsonParser.parseReader(reader).getAsJsonObject();
             require(translations.size() >= 100, "complete translation key set");
@@ -172,8 +200,8 @@ public final class MagicClientVerification {
     }
 
     @SubscribeEvent
-    public static void frame(TickEvent.RenderTickEvent event) {
-        if (!capture || event.phase != TickEvent.Phase.END) return;
+    public static void frame(RenderFrameEvent.Post event) {
+        if (!capture) return;
         capture = false;
         Minecraft mc = Minecraft.getInstance();
         Screenshot.grab(mc.gameDirectory, "verify-" + ticks + ".png", mc.getMainRenderTarget(),
