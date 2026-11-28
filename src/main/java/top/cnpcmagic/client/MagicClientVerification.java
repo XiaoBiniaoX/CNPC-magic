@@ -41,6 +41,23 @@ public final class MagicClientVerification {
     private static EntityNPCInterface guiNpc;
     private static int guiStage;
     private static int guiReadyAt;
+    private static LivingEntity beamNpc;
+    private static int beamTick, beamRun;
+    private static boolean beamHeld, beamCleared;
+
+    public static void ironRendered(LivingEntity entity) {
+        if (!Boolean.getBoolean("cnpcmagic.verify.ironGameplay") || entity.level() != Minecraft.getInstance().level) return;
+        if (beamTick == ticks) return;
+        beamRun = beamNpc == entity && beamTick == ticks - 1 ? beamRun + 1 : 1;
+        beamNpc = entity; beamTick = ticks;
+        if (beamRun >= 6 && !beamHeld) {
+            var data = io.redspace.ironsspellbooks.api.magic.MagicData.getPlayerMagicData(entity);
+            require(data.getAdditionalCastData() instanceof io.redspace.ironsspellbooks.spells.CastingMobAimingData,
+                "ordinary NPC native aiming data received");
+            beamHeld = true; capture = true;
+            CNPCMagic.LOGGER.info("VERIFY CLIENT PASS ordinary NPC native beam held={} aiming=true actor={}", beamRun, entity.getUUID());
+        }
+    }
 
     public static void applied(LivingEntity entity, String animation, HumanoidModel<?> model) {
         if (!Boolean.getBoolean("cnpcmagic.verify.client")) return;
@@ -64,7 +81,15 @@ public final class MagicClientVerification {
         Minecraft mc = Minecraft.getInstance();
         if (mc.player == null || mc.level == null) return;
         ticks++;
+        boolean gameplay = Boolean.getBoolean("cnpcmagic.verify.ironGameplay");
         if (ticks >= 450 && ticks < 600) verifyIndependentGui(mc);
+        if (gameplay && beamHeld && !beamCleared) {
+            var data = io.redspace.ironsspellbooks.api.magic.MagicData.getPlayerMagicData(beamNpc);
+            if (!data.isCasting() && data.getAdditionalCastData() == null) {
+                beamCleared = true;
+                CNPCMagic.LOGGER.info("VERIFY CLIENT PASS ordinary NPC native cast and aiming cleanup");
+            }
+        }
         if (ticks == 40) {
             try {
                 verifyLanguage(mc);
@@ -83,6 +108,7 @@ public final class MagicClientVerification {
         }
         if (ticks == 600) {
             if (guiStage < 4) CNPCMagic.LOGGER.error("VERIFY CLIENT FAIL independent GUI did not finish (stage={})", guiStage);
+            if (gameplay && (!beamHeld || !beamCleared)) CNPCMagic.LOGGER.error("VERIFY CLIENT FAIL ordinary NPC beam held={} cleanup={}", beamHeld, beamCleared);
             boolean valid = POSES.stream().anyMatch(id -> id.startsWith("goety:")) == ModList.get().isLoaded("goety")
                 && POSES.stream().anyMatch(id -> id.startsWith("irons_spellbooks:")) == ModList.get().isLoaded("irons_spellbooks")
                 && HELD.stream().anyMatch(id -> id.startsWith("goety:")) == ModList.get().isLoaded("goety")

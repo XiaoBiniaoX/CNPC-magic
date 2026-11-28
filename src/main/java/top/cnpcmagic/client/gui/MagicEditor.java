@@ -10,9 +10,10 @@ import top.cnpcmagic.network.NetworkHandler;
 public final class MagicEditor {
     static GuiNpcMagic editor;
     static DefinitionEditor definition;
-    private static boolean previewTransition;
+    /** Local detached-preview state only; it never drives a Minecraft dimension transition. */
+    private static boolean previewActive;
 
-    public static boolean isPreviewTransitionActive() { return previewTransition; }
+    public static boolean isPreviewActive() { return previewActive; }
 
     public static void send(String action) { CompoundTag t = new CompoundTag(); t.putString("action", action); send(t); }
     public static void send(CompoundTag data) { NetworkHandler.CHANNEL.sendToServer(new C2MMagicEditor(data)); }
@@ -34,7 +35,7 @@ public final class MagicEditor {
             }
             case "definitionDeleted" -> { if (editor != null) { editor.library.remove(data.getString("id")); if (Minecraft.getInstance().screen == editor) editor.rebuild(); } }
             case "previewBegin" -> {
-                previewTransition = true;
+                previewActive = true;
                 top.cnpcmagic.client.PreviewScene.open(net.minecraft.core.BlockPos.of(data.getLong("origin")));
                 if (picker != null) picker.begin();
             }
@@ -44,7 +45,7 @@ public final class MagicEditor {
             case "previewEnd" -> {
                 top.cnpcmagic.client.PreviewScene.dispose();
                 if (picker != null) picker.end();
-                previewTransition = false;
+                previewActive = false;
             }
         }
     }

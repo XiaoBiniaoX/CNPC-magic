@@ -208,11 +208,12 @@ public final class MagicScriptVerification {
             long elapsed = viewer.level().getGameTime() - viewStart;
             boolean goety = MagicProviders.get("goety") != null;
             boolean iron = MagicProviders.get("irons_spellbooks") != null;
-            int x = goety ? 140 : 40;
+            boolean beam = Boolean.getBoolean("cnpcmagic.verify.ironGameplay");
+            int x = beam ? 60 : goety ? 140 : 40;
             if (viewStage == 0 && elapsed >= 200) {
                 viewer.connection.teleport(x + 6.5, 80, -2.5, 60, 5);
                 viewStage++;
-            } else if (viewStage == 1 && elapsed >= 400 && goety && iron) {
+            } else if (viewStage == 1 && elapsed >= 400 && (beam || goety && iron)) {
                 viewer.connection.teleport(46.5, 80, -2.5, 60, 5);
                 viewStage++;
             }

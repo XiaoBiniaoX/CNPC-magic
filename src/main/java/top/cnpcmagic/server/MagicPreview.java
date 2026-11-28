@@ -9,7 +9,6 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.*;
 import net.minecraft.world.entity.ai.attributes.Attributes;
-import net.minecraft.world.level.GameType;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.phys.Vec3;
@@ -31,6 +30,7 @@ import java.util.*;
 public final class MagicPreview {
     public interface EntityData { List<net.minecraft.network.syncher.SynchedEntityData.DataValue<?>> cnpcmagic$values(); }
     public static final ResourceKey<Level> DIMENSION = ResourceKey.create(Registries.DIMENSION, new ResourceLocation("cnpcmagic", "preview"));
+    /** Marker written by pre-hotfix preview builds; it is only cleaned up now. */
     private static final String RETURN = "CNPCMagicPreviewReturn";
     private static final Map<UUID, Session> SESSIONS = new HashMap<>();
     private static final Map<UUID, UUID> OWNERS = new HashMap<>();
@@ -74,13 +74,6 @@ public final class MagicPreview {
         CompoundTag t = new CompoundTag(); t.putString("action", action); t.putInt("request", request); t.putString("message", message); MagicSync.send(player, t);
     }
     public static void finish(ServerPlayer player, boolean reopen) {
-        MagicRuntimeData runtime = MagicRuntimeData.get(player.server);
-        CompoundTag saved = runtime.getReturn(player.getUUID());
-        if (saved.isEmpty() && player.getPersistentData().contains(RETURN)) {
-            saved = player.getPersistentData().getCompound(RETURN).copy();
-            try { runtime.putReturn(player.getUUID(), saved); }
-            catch (IllegalStateException error) { top.cnpcmagic.CNPCMagic.LOGGER.error("Could not migrate preview return; inline data retained", error); }
-        }
         Session s = SESSIONS.get(player.getUUID());
         if (s != null) {
             s.clear(player.getUUID());
@@ -89,16 +82,17 @@ public final class MagicPreview {
             for (int x = (s.origin.getX() - 16) >> 4; x <= (s.origin.getX() + 32) >> 4; x++)
                 for (int z = -1; z <= 0; z++) s.arena.setChunkForced(x, z, false);
         }
-        if (!saved.isEmpty()) {
-            var key = ResourceKey.create(Registries.DIMENSION, new ResourceLocation(saved.getString("dimension")));
-            ServerLevel destination = player.server.getLevel(key); if (destination == null) destination = player.server.overworld();
-            player.teleportTo(destination, saved.getDouble("x"), saved.getDouble("y"), saved.getDouble("z"), saved.getFloat("yaw"), saved.getFloat("pitch"));
-            player.setGameMode(GameType.byId(saved.getInt("mode"))); player.getPersistentData().remove(RETURN);
-            try { runtime.removeReturn(player.getUUID()); }
-            catch (IllegalStateException error) { top.cnpcmagic.CNPCMagic.LOGGER.error("Preview return cleanup will retry at world save", error); }
-            if (saved.hasUUID("npc") && destination.getEntity(saved.getUUID("npc")) instanceof EntityNPCInterface npc) NoppesUtilServer.setEditingNpc(player, npc);
-        }
+        discardLegacyReturn(player);
         if (reopen) { CompoundTag t = new CompoundTag(); t.putString("action", "previewEnd"); MagicSync.send(player, t); }
+    }
+    /** Detached preview never owns the real player's dimension, position, view, or game mode. */
+    private static void discardLegacyReturn(ServerPlayer player) {
+        MagicRuntimeData runtime = MagicRuntimeData.get(player.server);
+        boolean external = !runtime.getReturn(player.getUUID()).isEmpty();
+        player.getPersistentData().remove(RETURN);
+        if (!external) return;
+        try { runtime.removeReturn(player.getUUID()); }
+        catch (IllegalStateException error) { top.cnpcmagic.CNPCMagic.LOGGER.error("Legacy preview return cleanup will retry at world save", error); }
     }
     private static List<Entity> entities(ServerLevel level) { List<Entity> all = new ArrayList<>(); level.getAllEntities().forEach(all::add); return all; }
     public static boolean isPreview(Entity entity) { return entity.level().dimension().equals(DIMENSION) && OWNERS.containsKey(entity.getUUID()); }
@@ -107,7 +101,7 @@ public final class MagicPreview {
         for (var entry : new ArrayList<>(SESSIONS.entrySet())) {
             Session s = entry.getValue(); ServerPlayer player = s.arena.getServer().getPlayerList().getPlayer(entry.getKey());
             if (player == null) continue;
-            if (++s.ticks > 1200 || player.level() != s.original.level()) { finish(player, true); continue; }
+            if (++s.ticks > 1200) { finish(player, true); continue; }
             try {
                 if (s.nextCast != 0 && s.ticks >= s.nextCast - 6 && !s.prepared) {
                     s.clear(player.getUUID()); s.prepared = true;
@@ -228,6 +222,9 @@ public final class MagicPreview {
                     actor.put("initial", initial);
                 }
                 actor.putDouble("x", entity.getX()); actor.putDouble("y", entity.getY()); actor.putDouble("z", entity.getZ());
+                Vec3 motion = entity.getDeltaMovement();
+                actor.putDouble("dx", motion.x); actor.putDouble("dy", motion.y); actor.putDouble("dz", motion.z);
+                actor.putBoolean("onGround", entity.onGround());
                 actor.putFloat("yaw", entity.getYRot()); actor.putFloat("pitch", entity.getXRot());
                 actor.putInt("age", entity.tickCount); actor.putInt("vehicle", entity.getVehicle() == null ? -1 : entity.getVehicle().getId());
                 if (entity instanceof LivingEntity living) {

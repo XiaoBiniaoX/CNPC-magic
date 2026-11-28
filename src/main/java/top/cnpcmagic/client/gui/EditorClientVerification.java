@@ -41,6 +41,115 @@ public final class EditorClientVerification {
     private static float originalYaw, originalPitch;
     private static net.minecraft.world.level.GameType originalMode;
     private static int stationaryChecks;
+    private static final String[] IRON_PREVIEWS = {"gtbcs_geomancy_plus:weeping_cluster", "gtbcs_geomancy_plus:solar_beam",
+        "gtbcs_geomancy_plus:solar_chorus", "iss_magicfromtheeast:jade_bullet", "irons_spellbooks:ray_of_siphoning"};
+    private static int ironIndex;
+    private static final java.util.Set<java.util.UUID> ironRendered = new java.util.HashSet<>();
+    private static net.minecraft.world.entity.Entity ironConstruct;
+    private static int ironSamples, ironLastAge;
+    private static double ironMinY, ironMaxY;
+
+    public static void ironRendered(net.minecraft.world.entity.LivingEntity entity) {
+        if (Boolean.getBoolean("cnpcmagic.verify.ironEditor") && ironRendered.add(entity.getUUID()))
+            CNPCMagic.LOGGER.info("IRON CLIENT native beam renderer actor={}", entity.getUUID());
+    }
+
+    private static void ironTick(Minecraft mc) {
+        switch (stage) {
+            case 2 -> {
+                press(editor, "cnpcmagic.provider.irons_spellbooks"); press(editor, "addSpell");
+                var p = editor.picker.provider;
+                for (String id : p.getSpellIds()) check(top.cnpcmagic.client.provider.ClientMagicProviders.forSpell(id) == p, "client registered ownership " + id);
+                for (var other : top.cnpcmagic.client.provider.ClientMagicProviders.all())
+                    if (other != p) check(other.getSchools().isEmpty(), "school UI exclusive to Iron");
+                check(p.getSchools().size() > 10, "registered addon schools included");
+                press(editor, "allSchools"); shot("iron-schools-open", editor);
+            }
+            case 3 -> {
+                String school = editor.picker.provider.getSchoolId("iss_magicfromtheeast:jade_bullet");
+                int i = rows(editor).names.indexOf(editor.picker.schools.get(school).getString());
+                rows(editor).offset = Math.max(0, i - rows(editor).capacity() + 1); chooseRow(editor, i);
+                check(editor.picker.school.equals(school), "native school chosen");
+                check(rows(editor).names.contains(editor.name("iss_magicfromtheeast:jade_bullet")), "addon school contains own spell");
+                check(!rows(editor).names.contains(editor.name("gtbcs_geomancy_plus:solar_beam")), "other school excluded");
+                shot("iron-addon-school-filter", editor);
+            }
+            case 4 -> {
+                ironConstruct = null; ironSamples = 0;
+                if (!editor.picker.school.isEmpty()) {
+                    String name = editor.picker.schools.get(editor.picker.school).getString();
+                    editor.children().stream().filter(c -> c instanceof Button b && b.getMessage().getString().equals(name))
+                        .map(Button.class::cast).findFirst().orElseThrow().onPress();
+                    rows(editor).offset = 0; chooseRow(editor, 0);
+                }
+                var search = (EditBox)editor.children().stream().filter(EditBox.class::isInstance).findFirst().orElseThrow();
+                search.setValue(IRON_PREVIEWS[ironIndex]);
+                check(rows(editor).names.size() == 1, "search finds registered addon spell"); chooseRow(editor, 0);
+            }
+            case 5, 7 -> {
+                if (editor.picker.status.startsWith("!")) throw new IllegalStateException(editor.picker.status);
+                if (!editor.picker.active || top.cnpcmagic.client.PreviewScene.instance() == null) return;
+                var actors = java.util.stream.StreamSupport.stream(top.cnpcmagic.client.PreviewScene.instance().entitiesForRendering().spliterator(), false).toList();
+                var caster = actors.stream().filter(e -> e instanceof EntityNPCInterface && e.getName().getString().equals("Preview"))
+                    .map(EntityNPCInterface.class::cast).findFirst().orElse(null);
+                var target = actors.stream().filter(e -> e instanceof net.minecraft.world.entity.Mob && e.getName().getString().equals("Target"))
+                    .map(net.minecraft.world.entity.Mob.class::cast).findFirst().orElse(null);
+                if (caster == null || target == null || caster.getUUID().equals(wizardryActor)) return;
+                String id = IRON_PREVIEWS[ironIndex];
+                if (ironIndex == 0) {
+                    var construct = actors.stream().filter(e -> net.minecraft.core.registries.BuiltInRegistries.ENTITY_TYPE
+                        .getKey(e.getType()).toString().equals("gtbcs_geomancy_plus:crying_obsidian_cluster")).findFirst().orElse(null);
+                    if (ironConstruct == null) {
+                        if (construct == null) return;
+                        ironConstruct = construct; ironMinY = ironMaxY = construct.getY();
+                    }
+                    check(construct == ironConstruct && !construct.isRemoved(), "native construct identity continuous");
+                    check(ironSamples == 0 || construct.tickCount > ironLastAge, "native construct ticks between snapshots");
+                    ironLastAge = construct.tickCount;
+                    ironMinY = Math.min(ironMinY, construct.getY()); ironMaxY = Math.max(ironMaxY, construct.getY());
+                    var floor = net.minecraft.core.BlockPos.containing(construct.getX(), 79, construct.getZ());
+                    var collision = construct.level().getChunkForCollisions(floor.getX() >> 4, floor.getZ() >> 4);
+                    check(collision != null && !collision.getBlockState(floor).isAir(), "preview platform participates in native collision");
+                    check(construct.getY() >= 79.99 && ironMaxY - ironMinY < 0.08, "native construct stays on floor y=" + construct.getY());
+                    if (++ironSamples == 13 || ironSamples == 29 || ironSamples == 47)
+                        shot("iron-0-continuity-" + (stage == 7 ? "replay-" : "initial-") + ironSamples, editor);
+                    if (ironSamples < 60) return;
+                    CNPCMagic.LOGGER.info("IRON CLIENT CONTINUITY replay={} samples={} sameEntity=true yMin={} yMax={}",
+                        stage == 7, ironSamples, ironMinY, ironMaxY);
+                }
+                if (ticks - at < 42) return;
+                boolean effect = target.getHealth() < target.getMaxHealth() || actors.stream().anyMatch(e ->
+                    net.minecraft.core.registries.BuiltInRegistries.ENTITY_TYPE.getKey(e.getType()).getNamespace().equals(id.substring(0, id.indexOf(':'))));
+                if (!effect || (id.endsWith(":ray_of_siphoning") && !ironRendered.contains(caster.getUUID()))) return;
+                wizardryActor = caster.getUUID();
+                CNPCMagic.LOGGER.info("EDITOR CLIENT IRON PREVIEW id={} replay={} actor={} targetHealth={} entities={}",
+                    id, stage == 7, caster.getUUID(), target.getHealth(), actors.size());
+                shot("iron-" + ironIndex + (stage == 7 ? "-replay" : "-initial"), editor);
+            }
+            case 6 -> { ironConstruct = null; ironSamples = 0; press(editor, "replay"); }
+            case 8 -> { if (++ironIndex < IRON_PREVIEWS.length) stage = 3; else press(editor, "addSpell"); }
+            case 9 -> { if (editor.picker != null || editor.saving) return; press(editor, "save"); }
+            case 10 -> {
+                if (!editor.ready() || !editor.status.equals(EditorScreen.text("saved"))) return;
+                editor = new GuiNpcMagic(npc); mc.setScreen(editor);
+            }
+            case 11 -> {
+                if (!editor.ready()) return;
+                check(editor.rules.getOrDefault("irons_spellbooks", java.util.List.of()).stream().anyMatch(r -> r.spellId.equals(IRON_PREVIEWS[IRON_PREVIEWS.length - 1])), "Iron draft saved and reopened");
+                mc.options.guiScale().set(4); mc.resizeDisplay();
+                press(editor, "cnpcmagic.provider.irons_spellbooks"); press(editor, "addSpell"); press(editor, "allSchools");
+                shot("iron-schools-narrow", editor);
+            }
+            case 12 -> {
+                check(top.cnpcmagic.client.PreviewScene.instance() == null, "detached scene released");
+                CNPCMagic.LOGGER.info("HOTFIX PLAYER UNCHANGED checks={} dimension={} position={} mode={}", stationaryChecks,
+                    mc.level.dimension().location(), mc.player.position(), mc.gameMode.getPlayerMode());
+                CNPCMagic.LOGGER.info("EDITOR CLIENT PASS COMPLETE: IRON registered addons, native beams, schools, replay, draft save/reopen");
+                finished = true; mc.stop();
+            }
+        }
+        stage++; at = ticks;
+    }
 
     @SubscribeEvent
     public static void joined(net.minecraftforge.event.entity.EntityJoinLevelEvent event) {
@@ -55,7 +164,7 @@ public final class EditorClientVerification {
     @SubscribeEvent(priority = net.minecraftforge.eventbus.api.EventPriority.LOWEST, receiveCanceled = true)
     public static void opening(net.minecraftforge.client.event.ScreenEvent.Opening event) {
         if (!Boolean.getBoolean("cnpcmagic.verify.editor")
-            || !MagicEditor.isPreviewTransitionActive()
+            || !MagicEditor.isPreviewActive()
             || !(event.getNewScreen() instanceof net.minecraft.client.gui.screens.ReceivingLevelScreen
                 || event.getNewScreen() instanceof net.minecraft.client.gui.screens.ProgressScreen)) return;
         if (event.isCanceled()) {
@@ -178,6 +287,7 @@ public final class EditorClientVerification {
                 throw new IllegalStateException("Editor screenshot fixture timed out at stage " + stage + " spell=" + WIZARDRY_PREVIEWS[wizardryIndex]);
             if (ticks < 160) return;
             if (ticks - at < 8) return;
+            if (Boolean.getBoolean("cnpcmagic.verify.ironEditor") && stage >= 2) { ironTick(mc); return; }
             if (Boolean.getBoolean("cnpcmagic.verify.wizardryEditor") && stage >= 2) {
                 switch (stage) {
                     case 2 -> {
@@ -190,7 +300,7 @@ public final class EditorClientVerification {
                     case 3, 5 -> {
                         if (editor.picker == null || !editor.picker.active
                             || top.cnpcmagic.client.PreviewScene.instance() == null) return;
-                        check(mc.screen == editor && MagicEditor.isPreviewTransitionActive(), "Wizardry preview retains editor");
+                        check(mc.screen == editor && MagicEditor.isPreviewActive(), "Wizardry preview retains editor");
                         String selected = "ebwizardry:" + WIZARDRY_PREVIEWS[wizardryIndex];
                         check(editor.picker.selected.equals(selected) && editor.picker.level.equals("1")
                             && editor.picker.hasProperties(), "Wizardry selected spell and properties retained");
@@ -229,7 +339,7 @@ public final class EditorClientVerification {
                     }
                     case 7 -> {
                         if (editor.picker != null || editor.saving) return;
-                        check(mc.screen == editor && !MagicEditor.isPreviewTransitionActive(), "Wizardry returns to editor and clears transition");
+                        check(mc.screen == editor && !MagicEditor.isPreviewActive(), "Wizardry returns to editor and clears preview");
                         check(suppressedLoadingScreens == 0 && suppressedProgressScreens == 0, "detached preview needs no loading screens");
                         check(top.cnpcmagic.client.PreviewScene.instance() == null, "preview scene released on close");
                         for (Screen screen : java.util.List.of(new net.minecraft.client.gui.screens.ReceivingLevelScreen(),
@@ -333,7 +443,7 @@ public final class EditorClientVerification {
                 case 8 -> {
                     if (editor.picker == null || !editor.picker.active
                         || top.cnpcmagic.client.PreviewScene.instance() == null) return;
-                    check(MagicEditor.isPreviewTransitionActive(), "preview transition state during initial transfer");
+                    check(MagicEditor.isPreviewActive(), "detached preview state during initial frame");
                     check(mc.screen == editor, "editor remains visible during initial preview transfer: "
                         + (mc.screen == null ? "null" : mc.screen.getClass().getName()));
                     check(editor.picker.selected.equals("cnpcmagic:channel_beam")
@@ -444,7 +554,7 @@ public final class EditorClientVerification {
                 }
                 case 22 -> {
                     if (editor.picker != null) return;
-                    check(!MagicEditor.isPreviewTransitionActive(), "preview transition state cleared after return");
+                    check(!MagicEditor.isPreviewActive(), "detached preview state cleared after return");
                     check(mc.screen == editor, "editor restored after preview return");
                     check(suppressedLoadingScreens == 0 && suppressedProgressScreens == 0, "no preview loading screens or transitions");
                     for (Screen screen : java.util.List.of(new net.minecraft.client.gui.screens.ReceivingLevelScreen(),

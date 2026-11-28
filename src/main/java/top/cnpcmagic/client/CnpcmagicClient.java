@@ -27,6 +27,7 @@ public final class CnpcmagicClient {
             if (ModList.get().isLoaded("irons_spellbooks")) {
                 try {
                     ClientMagicProviders.register(new IronClientProvider());
+                    net.minecraftforge.common.MinecraftForge.EVENT_BUS.addListener(IronClientProvider::renderNpc);
                 } catch (Throwable t) {
                     CNPCMagic.LOGGER.error("Failed to register Iron's Spellbooks client provider", t);
                 }

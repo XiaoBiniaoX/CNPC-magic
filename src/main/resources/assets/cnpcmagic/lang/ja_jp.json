@@ -53,6 +53,8 @@
   "cnpcmagic.editor.continue": "編集を続行",
   "cnpcmagic.editor.invalidNumbers": "レベル・回数・待ち時間・距離を確認してください。",
   "cnpcmagic.editor.search": "魔法名または ID を検索",
+  "cnpcmagic.editor.allSchools": "すべての学派",
+  "cnpcmagic.editor.schoolFilter": "学派：%s（クリックで選択）",
   "cnpcmagic.editor.previewHint": "この NPC で試す",
   "cnpcmagic.editor.target": "対象",
   "cnpcmagic.editor.entity": "生物",

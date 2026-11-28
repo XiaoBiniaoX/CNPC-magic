@@ -15,5 +15,9 @@ public interface ClientMagicProvider {
 
     default boolean requiresMeleeTarget(String spellId) { return false; }
 
+    default java.util.Map<String, Component> getSchools() { return java.util.Map.of(); }
+
+    default String getSchoolId(String spellId) { return ""; }
+
     List<? extends Component> describe(String spellId, int level, LivingEntity caster);
 }

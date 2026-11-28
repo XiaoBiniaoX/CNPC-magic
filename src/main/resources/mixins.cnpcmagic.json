@@ -2,6 +2,7 @@
   "required": true,
   "minVersion": "0.8",
   "package": "top.cnpcmagic.mixin",
+  "plugin": "top.cnpcmagic.CnpcMixinPlugin",
   "compatibilityLevel": "JAVA_17",
   "refmap": "cnpcmagic.refmap.json",
   "mixins": [
@@ -11,6 +12,8 @@
     "MixinPreviewNearby",
     "MixinGoetyScriptTarget",
     "MixinIronCastData",
+    "MixinIronNpc",
+    "MixinIronGeomancyGround",
     "MixinWizardryConstruct",
     "MixinWizardryRay",
     "MixinWizardryEnrage",

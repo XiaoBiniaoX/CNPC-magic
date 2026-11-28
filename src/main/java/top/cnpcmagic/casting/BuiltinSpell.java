@@ -35,7 +35,7 @@ public final class BuiltinSpell implements MagicProvider {
         .<Bolt>of(Bolt::new, MobCategory.MISC).sized(0.25f, 0.25f).clientTrackingRange(64).updateInterval(1).noSave().build("cnpcmagic:spell_bolt"));
     private static final Map<UUID, Entity> SUMMONS = new HashMap<>();
     public String getId() { return "cnpcmagic"; }
-    public boolean isValidSpell(String id) { return ResourceLocation.tryParse(id) != null; }
+    public boolean isValidSpell(String id) { var key = ResourceLocation.tryParse(id); return key != null && key.getNamespace().equals(getId()); }
     public int getMaxLevel(String id) { return 10; }
     public MagicCast startCast(LivingEntity caster, String id, int level, LivingEntity target) {
         // CastingService takes this branch directly with its complete target descriptor.

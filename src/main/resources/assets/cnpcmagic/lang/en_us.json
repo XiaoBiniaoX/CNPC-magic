@@ -53,6 +53,8 @@
   "cnpcmagic.editor.continue": "Keep editing",
   "cnpcmagic.editor.invalidNumbers": "Check level, count, cooldown and range limits.",
   "cnpcmagic.editor.search": "Search spells or IDs",
+  "cnpcmagic.editor.allSchools": "All schools",
+  "cnpcmagic.editor.schoolFilter": "School: %s (click to choose)",
   "cnpcmagic.editor.previewHint": "Test with this NPC",
   "cnpcmagic.editor.target": "Target",
   "cnpcmagic.editor.entity": "Entity",

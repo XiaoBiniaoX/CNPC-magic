@@ -66,6 +66,7 @@ public final class PreviewScene extends ClientLevel {
     }
 
     @Override public BlockState getBlockState(BlockPos pos) { return blocks.getOrDefault(pos, Blocks.AIR.defaultBlockState()); }
+    @Override public net.minecraft.world.level.BlockGetter getChunkForCollisions(int x, int z) { return this; }
     @Override public net.minecraft.world.level.block.entity.BlockEntity getBlockEntity(BlockPos pos) { return blockEntities.get(pos); }
     public Collection<net.minecraft.world.level.block.entity.BlockEntity> previewBlockEntities() { return blockEntities.values(); }
     @Override public int getBrightness(LightLayer layer, BlockPos pos) { return 15; }
@@ -130,7 +131,9 @@ public final class PreviewScene extends ClientLevel {
             }
             if (entity == null) continue;
             entity.moveTo(actor.getDouble("x"), actor.getDouble("y"), actor.getDouble("z"), actor.getFloat("yaw"), actor.getFloat("pitch"));
-            entity.tickCount = actor.getInt("age");
+            entity.setDeltaMovement(actor.getDouble("dx"), actor.getDouble("dy"), actor.getDouble("dz"));
+            entity.setOnGround(actor.getBoolean("onGround"));
+            entity.tickCount = Math.max(entity.tickCount, actor.getInt("age"));
             if (entity instanceof LivingEntity living) {
                 living.setYHeadRot(actor.getFloat("head")); living.yBodyRot = actor.getFloat("body"); living.hurtTime = actor.getInt("hurt");
             }

@@ -25,6 +25,11 @@ public final class MagicProviders {
 
     public static MagicProvider forSpell(String spell) {
         int colon = spell == null ? -1 : spell.indexOf(':');
-        return colon < 0 ? null : get(spell.substring(0, colon));
+        if (colon < 0) return null;
+        MagicProvider direct = get(spell.substring(0, colon));
+        if (direct != null) return direct;
+        // Addons register spells in their own namespace, but use the host mod's casting API.
+        for (MagicProvider provider : PROVIDERS.values()) if (provider.isValidSpell(spell)) return provider;
+        return null;
     }
 }

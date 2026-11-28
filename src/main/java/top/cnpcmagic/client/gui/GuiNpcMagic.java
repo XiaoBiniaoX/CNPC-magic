@@ -90,10 +90,10 @@ public class GuiNpcMagic extends EditorScreen implements IGuiData {
             return definition.name.equals(path.replace('_', ' ')) && net.minecraft.locale.Language.getInstance().has(key)
                 ? Component.translatable(key).getString() : definition.name;
         }
-        int colon = id.indexOf(':'); ClientMagicProvider p = colon < 0 ? null : ClientMagicProviders.get(id.substring(0, colon));
+        ClientMagicProvider p = ClientMagicProviders.forSpell(id);
         return p == null ? id.isEmpty() ? text("cnpcmagic.gui.none") : id : p.getDisplayName(id);
     }
-    int maxLevel(String id) { int colon = id.indexOf(':'); var p = colon < 0 ? null : ClientMagicProviders.get(id.substring(0, colon)); return id.startsWith("cnpcmagic:") ? 10 : p == null ? Integer.MAX_VALUE : Math.max(1, p.getMaxLevel(id)); }
+    int maxLevel(String id) { var p = ClientMagicProviders.forSpell(id); return id.startsWith("cnpcmagic:") ? 10 : p == null ? Integer.MAX_VALUE : Math.max(1, p.getMaxLevel(id)); }
     void openPicker(RuleEditor edit) {
         picker = new SpellPicker(this, edit); rebuild();
         if (edit != null && !edit.rule.spellId.isEmpty()) picker.preview();
